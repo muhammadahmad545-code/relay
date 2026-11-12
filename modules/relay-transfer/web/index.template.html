@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Relay</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#0B0D10;--surface:#13161B;--raised:#1B1F26;--border:#262B34;--text:#F2F4F7;--muted:#A3ABB8;--faint:#6B7380;--accent:#2DE1C2;--on-accent:#06110F;--soft:rgba(45,225,194,.12);--ok:#3DD68C;--bad:#FF6B6B;--warn:#F5B544}
+@media (prefers-color-scheme:light){:root{--bg:#F6F7F9;--surface:#fff;--raised:#fff;--border:#E3E6EB;--text:#0F1216;--muted:#55606E;--faint:#8A94A3;--accent:#0B8F7A;--on-accent:#fff;--soft:rgba(11,143,122,.1);--ok:#12855A;--bad:#C93636;--warn:#A9690A}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:920px;margin:0 auto;padding:24px 16px 64px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:40px;height:40px;border-radius:12px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font-weight:800;font-size:18px}
+h1{font-size:20px;margin:0;letter-spacing:-.3px}
+.sub{color:var(--muted);font-size:13px}
+#status{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface);font-size:13px;color:var(--muted)}
+#status::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--faint)}
+#status[data-kind=on]::before{background:var(--ok)}
+#status[data-kind=wait]::before{background:var(--warn)}
+#status[data-kind=off]::before{background:var(--bad)}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}
+section{background:var(--surface);border:1px solid var(--border);border-radius:24px;padding:20px;min-width:0}
+h2{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+#drop{border:1.5px dashed var(--border);border-radius:16px;padding:32px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;outline-offset:3px}
+#drop:hover,#drop.over,#drop:focus-visible{border-color:var(--accent);background:var(--soft)}
+#drop strong{display:block;font-size:16px;margin-bottom:4px}
+#drop span{color:var(--muted);font-size:13px}
+ul{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:10px}
+.row{background:var(--raised);border:1px solid var(--border);border-radius:14px;padding:12px;min-width:0}
+.row-top{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.row-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.row-meta{color:var(--muted);font-size:12px;margin-top:6px;overflow-wrap:anywhere}
+.track{height:6px;background:var(--border);border-radius:999px;margin-top:10px;overflow:hidden}
+.bar{height:100%;width:0;background:var(--accent);border-radius:999px;transition:width .2s}
+.row[data-state=done] .bar{background:var(--ok)}
+.row[data-state=failed] .bar{background:var(--bad)}
+.row[data-state=failed] .row-meta{color:var(--bad)}
+.link{background:none;border:0;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;padding:4px 6px;border-radius:8px;flex:none}
+.link:hover{background:var(--soft)}
+textarea{width:100%;min-height:92px;resize:vertical;background:var(--raised);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:12px;font:inherit}
+textarea:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.primary{margin-top:10px;background:var(--accent);color:var(--on-accent);border:0;border-radius:14px;padding:12px 20px;font:inherit;font-weight:600;cursor:pointer}
+.primary:disabled{opacity:.6;cursor:default}
+.text-item{margin:0 0 6px;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace}
+.empty{color:var(--muted);font-size:13px;margin:0}
+#link-qr{width:min(100%,260px);flex:none;border-radius:16px;overflow:hidden;background:#fff;padding:6px}
+#link-qr svg{display:block;width:100%;height:auto}
+.link-wrap{display:flex;gap:24px;align-items:center;flex-wrap:wrap;justify-content:center}
+.link-wrap>div:last-child{flex:1;min-width:240px}
+.link-wrap strong{font-size:18px}
+.link-wrap ol{margin:10px 0 12px;padding-left:20px;color:var(--text)}
+.link-wrap li{margin:4px 0}
+#fatal{text-align:center;padding:48px 20px}
+#fatal strong{display:block;font-size:18px;margin-bottom:8px}
+footer{margin-top:24px;color:var(--faint);font-size:12px;text-align:center}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">
+      <div class="mark" aria-hidden="true">R</div>
+      <div><h1>Relay</h1><div class="sub" id="device">Private transfer on your own network</div></div>
+    </div>
+    <div id="status" data-kind="wait" role="status"><span id="status-text">Connecting…</span></div>
+  </header>
+
+  <section id="fatal" hidden><strong>Can't connect</strong><span id="fatal-text" class="sub"></span></section>
+
+  <section id="link" hidden>
+    <div class="link-wrap">
+      <div id="link-qr"></div>
+      <div>
+        <strong>Link this browser</strong>
+        <ol>
+          <li>Open <b>Relay</b> on your phone and tap <b>Receive</b>.</li>
+          <li>Tap <b>Link a laptop</b>.</li>
+          <li>Point the phone at this code.</li>
+        </ol>
+        <span class="sub">The code carries a one-time public key. Your files' encryption key is then sent to this browser wrapped, so nobody else on the network can read it.</span>
+      </div>
+    </div>
+  </section>
+
+  <div id="app" class="grid" hidden>
+    <section>
+      <h2>Send to phone</h2>
+      <div id="drop" role="button" tabindex="0" aria-label="Choose files to send to the phone">
+        <strong>Drop files here</strong><span>or click to choose · paste also works</span>
+      </div>
+      <input id="pick" type="file" multiple hidden>
+      <ul id="send-list" aria-live="polite"></ul>
+    </section>
+    <section>
+      <h2>From phone</h2>
+      <p id="inbox-empty" class="empty">Nothing shared yet. On the phone, tap “Share to this session”.</p>
+      <ul id="inbox-list" aria-live="polite"></ul>
+    </section>
+    <section>
+      <h2>Send text</h2>
+      <textarea id="text" placeholder="Paste a link, a note, a code…" aria-label="Text to send to the phone"></textarea>
+      <button id="text-send" class="primary">Send text</button>
+    </section>
+  </div>
+
+  <footer>Everything is encrypted in this browser with a key from the QR code. Nothing leaves your network.</footer>
+</main>
+<script>/*__RELAY_SCRIPT__*/</script>
+</body>
+</html>
