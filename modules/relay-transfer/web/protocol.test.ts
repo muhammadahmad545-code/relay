@@ -86,12 +86,37 @@ test('cancelling stops an upload', async () => {
   assert.ok(![...ref.received.values()].some((f) => f.name === 'cancel.bin'));
 });
 
-test('a browser linked by QR scan receives the session key; the pickup is one-time', async () => {
+test('a browser linked by QR scan receives the session key, and can collect it again if a response was lost', async () => {
   const request = createLinkRequest();
   const pending = waitForLink(ref.url, request);
   ref.link(request.code);
   assert.deepEqual(Buffer.from(await pending), ref.key);
-  assert.equal((await fetch(`${ref.url}/pair/${request.id}`)).status, 404);
+  assert.equal((await fetch(`${ref.url}/pair/${request.id}`)).status, 200);
+});
+
+test('linking gives up with a clear message instead of waiting forever', async () => {
+  await assert.rejects(waitForLink(ref.url, createLinkRequest(), undefined, 1500), /did not link in time/);
+});
+
+test('a captured request cannot be replayed', async () => {
+  const body = seal(new Uint8Array(ref.key), 'text', new TextEncoder().encode(JSON.stringify({ text: 'once' })));
+  const send = () => fetch(`${ref.url}/api/text`, { method: 'POST', headers: { 'X-Relay-Token': deriveToken(new Uint8Array(ref.key)) }, body: body as BodyInit });
+  assert.equal((await send()).status, 200);
+  const replay = await send();
+  assert.equal(replay.status, 400);
+  assert.match((await replay.json()).error, /already used/);
+});
+
+test('downloads can stream chunk by chunk and are acknowledged to the phone', async () => {
+  const data = randomBytes(CHUNK * 2 + 10);
+  ref.outbox.push({ id: 'f2', kind: 'file', name: 'video.mp4', mime: 'video/mp4', data, text: null });
+  const item = (await client.listOutbox()).find((i) => i.id === 'f2')!;
+  const parts: Buffer[] = [];
+  const kept = await client.download(item, { onChunk: async (c) => void parts.push(Buffer.from(c)) });
+  assert.equal(kept.length, 0);
+  assert.ok(Buffer.concat(parts).equals(data));
+  await client.ack(item, true);
+  assert.deepEqual(ref.acks.at(-1), { id: 'f2', ok: true, error: '' });
 });
 
 test('a different browser cannot unwrap a key linked to someone else', async () => {

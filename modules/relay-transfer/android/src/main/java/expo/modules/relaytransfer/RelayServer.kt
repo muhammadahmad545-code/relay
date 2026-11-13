@@ -7,9 +7,13 @@ import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import javax.crypto.AEADBadTagException
 
 typealias RelayEmitter = (name: String, body: Map<String, Any?>) -> Unit
@@ -25,10 +29,12 @@ private class Incoming(
   val temp: File,
   val peer: String
 ) {
-  val stream = FileOutputStream(temp)
+  /** Opened on the first chunk, so abandoned transfers never hold a file handle. */
+  var stream: FileOutputStream? = null
   var nextIndex = 0
   var received = 0L
   var finished = false
+  var lastActivity = System.currentTimeMillis()
 }
 
 class OutboxItem(
@@ -42,6 +48,13 @@ class OutboxItem(
 ) {
   val totalChunks: Int
     get() = if (size == 0L) 0 else ((size + RelayFiles.CHUNK_BYTES - 1) / RelayFiles.CHUNK_BYTES).toInt()
+}
+
+/** One browser download of a shared file, tracked so the phone can show progress, done or stopped. */
+private class Download(val eventId: String, val item: OutboxItem) {
+  val startedAt = System.currentTimeMillis()
+  var lastActivity = startedAt
+  var sent = 0L
 }
 
 /**
@@ -59,10 +72,18 @@ class RelayServer(
   private val token = RelayCrypto.token(key)
   private val incoming = ConcurrentHashMap<String, Incoming>()
   private val outbox = java.util.Collections.synchronizedList(mutableListOf<OutboxItem>())
+  private val downloads = ConcurrentHashMap<String, Download>()
   private val knownPeers = ConcurrentHashMap.newKeySet<String>()
   private val pairings = ConcurrentHashMap<String, Pair<Long, RelayCrypto.LinkResponse>>()
+  /** Nonces of every message accepted this session: a captured message can never be replayed. */
+  private val seenNonces = java.util.Collections.synchronizedSet(HashSet<String>())
+  private val reaper: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+  private var downloadCounter = 0
 
-  /** Called after the phone scans a browser's link code. The browser collects the result from /pair/<id>. */
+  init {
+    reaper.scheduleWithFixedDelay({ runCatching { reap() } }, 15, 15, TimeUnit.SECONDS)
+  }
+
   fun link(id: String, browserPublicKey: String) {
     val now = System.currentTimeMillis()
     pairings.entries.removeIf { now - it.value.first > PAIRING_TTL_MS }
@@ -84,16 +105,39 @@ class RelayServer(
 
   fun shutdown() {
     stop()
+    reaper.shutdownNow()
     incoming.values.forEach { transfer ->
       synchronized(transfer) {
         if (!transfer.finished) {
-          runCatching { transfer.stream.close() }
+          transfer.finished = true
+          runCatching { transfer.stream?.close() }
           transfer.temp.delete()
           emitTransfer(transfer, "failed", "The session was closed before the transfer finished.")
         }
       }
     }
     incoming.clear()
+    downloads.values.forEach { emitDownload(it, "failed", "The session was closed.") }
+    downloads.clear()
+  }
+
+  /** Fails transfers that went quiet (closed laptop tab, lost Wi-Fi) so nothing stays "active" forever. */
+  private fun reap() {
+    val now = System.currentTimeMillis()
+    incoming.values.filter { now - it.lastActivity > IDLE_MS }.forEach { transfer ->
+      synchronized(transfer) {
+        if (transfer.finished) return@synchronized
+        transfer.finished = true
+        runCatching { transfer.stream?.close() }
+        transfer.temp.delete()
+        emitTransfer(transfer, "failed", "The other device stopped sending.")
+      }
+      incoming.remove(transfer.id)
+    }
+    downloads.entries.filter { now - it.value.lastActivity > IDLE_MS }.forEach { (k, d) ->
+      downloads.remove(k)
+      emitDownload(d, "failed", "The download stopped.")
+    }
   }
 
   override fun serve(session: IHTTPSession): Response {
@@ -109,6 +153,14 @@ class RelayServer(
       plainJson(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "The phone could not process the request."))
         .also { it.closeConnection(true) }
     }
+  }
+
+  /** Decrypts a request body and rejects any nonce already used in this session. */
+  private fun openOnce(aad: String, sealed: ByteArray): ByteArray {
+    val plain = RelayCrypto.open(key, aad, sealed)
+    val nonce = sealed.copyOfRange(0, RelayCrypto.NONCE_BYTES).joinToString("") { "%02x".format(it) }
+    if (!seenNonces.add(nonce)) throw HttpError(Response.Status.BAD_REQUEST, "This request was already used.")
+    return plain
   }
 
   private fun route(session: IHTTPSession): Response {
@@ -131,21 +183,22 @@ class RelayServer(
     return when {
       method == Method.GET && parts == listOf("hello") -> sealedJson("hello", JSONObject()
         .put("name", deviceName)
-        .put("protocol", 1)
+        .put("protocol", 2)
         .put("chunkBytes", RelayFiles.CHUNK_BYTES))
 
       method == Method.POST && parts == listOf("transfers") -> createTransfer(session, peer)
       method == Method.GET && parts.size == 2 && parts[0] == "transfers" -> transferStatus(parts[1])
       method == Method.PUT && parts.size == 4 && parts[0] == "transfers" && parts[2] == "chunks" ->
         receiveChunk(session, parts[1], parts[3].toIntOrNull() ?: throw HttpError(Response.Status.BAD_REQUEST, "Bad chunk index."))
-      method == Method.POST && parts.size == 3 && parts[0] == "transfers" && parts[2] == "complete" -> completeTransfer(parts[1])
-      method == Method.POST && parts.size == 3 && parts[0] == "transfers" && parts[2] == "cancel" -> cancelTransfer(parts[1])
+      method == Method.POST && parts.size == 3 && parts[0] == "transfers" && parts[2] == "complete" -> completeTransfer(session, parts[1])
+      method == Method.POST && parts.size == 3 && parts[0] == "transfers" && parts[2] == "cancel" -> cancelTransfer(session, parts[1])
 
       method == Method.POST && parts == listOf("text") -> receiveText(session, peer)
 
       method == Method.GET && parts == listOf("outbox") -> listOutbox()
       method == Method.GET && parts.size == 4 && parts[0] == "outbox" && parts[2] == "chunks" ->
         sendChunk(parts[1], parts[3].toIntOrNull() ?: throw HttpError(Response.Status.BAD_REQUEST, "Bad chunk index."))
+      method == Method.POST && parts.size == 3 && parts[0] == "outbox" && parts[2] == "ack" -> ackDownload(session, parts[1])
 
       else -> throw HttpError(Response.Status.NOT_FOUND, "Not found.")
     }
@@ -167,23 +220,35 @@ class RelayServer(
     }
   }
 
-  /** One-time pickup: the wrapped key is removed as soon as it is collected. */
+  /**
+   * The wrapped key stays collectable until it expires: it is useless without the browser's private
+   * key, and deleting it on first pickup let a lost response leave the browser waiting forever.
+   */
   private fun collectPairing(id: String): Response {
-    val entry = pairings.remove(id) ?: throw HttpError(Response.Status.NOT_FOUND, "Not linked yet.")
-    if (System.currentTimeMillis() - entry.first > PAIRING_TTL_MS) throw HttpError(Response.Status.NOT_FOUND, "Not linked yet.")
+    val entry = pairings[id] ?: throw HttpError(Response.Status.NOT_FOUND, "Not linked yet.")
+    if (System.currentTimeMillis() - entry.first > PAIRING_TTL_MS) {
+      pairings.remove(id)
+      throw HttpError(Response.Status.NOT_FOUND, "Not linked yet.")
+    }
     return plainJson(Response.Status.OK, JSONObject().put("pub", entry.second.publicKey).put("sealed", entry.second.sealedKey))
   }
 
   // ---- receiving ---------------------------------------------------------------------------
 
+  private fun reservedBytes(): Long = incoming.values.filter { !it.finished }.sumOf { it.size - it.received }
+
   private fun createTransfer(session: IHTTPSession, peer: String): Response {
-    val meta = JSONObject(String(RelayCrypto.open(key, "meta", readBody(session, 64 * 1024)), Charsets.UTF_8))
+    val meta = JSONObject(String(openOnce("meta", readBody(session, 64 * 1024)), Charsets.UTF_8))
     val size = meta.getLong("size")
     if (size < 0) throw HttpError(Response.Status.BAD_REQUEST, "Bad file size.")
+    if (incoming.values.count { !it.finished } >= MAX_ACTIVE_INCOMING) {
+      throw HttpError(Response.Status.SERVICE_UNAVAILABLE, "The phone is already receiving $MAX_ACTIVE_INCOMING files. Try again when one finishes.")
+    }
     val expectedChunks = if (size == 0L) 0 else ((size + RelayFiles.CHUNK_BYTES - 1) / RelayFiles.CHUNK_BYTES).toInt()
 
     val dir = RelayFiles.tempDir(context)
-    if (dir.usableSpace < size * 2 + 32L * 1024 * 1024) {
+    // The temp copy plus the copy in Downloads, plus everything other transfers still need.
+    if (dir.usableSpace < reservedBytes() + size * 2 + 32L * 1024 * 1024) {
       throw HttpError(Response.Status.BAD_REQUEST, "The phone does not have enough free storage for this file.")
     }
     val id = RelayCrypto.newId()
@@ -203,7 +268,7 @@ class RelayServer(
 
   private fun transferStatus(id: String): Response {
     val transfer = incoming[id] ?: throw HttpError(Response.Status.NOT_FOUND, "Transfer not found.")
-    return plainJson(Response.Status.OK, JSONObject().put("next", transfer.nextIndex))
+    return plainJson(Response.Status.OK, JSONObject().put("next", transfer.nextIndex).put("finished", transfer.finished))
   }
 
   private fun receiveChunk(session: IHTTPSession, id: String, index: Int): Response {
@@ -211,6 +276,7 @@ class RelayServer(
     val sealed = readBody(session, RelayFiles.CHUNK_BYTES + RelayCrypto.OVERHEAD)
     synchronized(transfer) {
       if (transfer.finished) throw HttpError(Response.Status.CONFLICT, "Transfer already finished.")
+      transfer.lastActivity = System.currentTimeMillis()
       if (index != transfer.nextIndex) {
         // Tell the sender where to resume from instead of failing the whole transfer.
         throw HttpError(Response.Status.CONFLICT, "Out of order chunk.", JSONObject().put("next", transfer.nextIndex))
@@ -219,7 +285,17 @@ class RelayServer(
       if (transfer.received + plain.size > transfer.size) {
         throw HttpError(Response.Status.BAD_REQUEST, "More data than announced.")
       }
-      transfer.stream.write(plain)
+      try {
+        val stream = transfer.stream ?: FileOutputStream(transfer.temp).also { transfer.stream = it }
+        stream.write(plain)
+      } catch (e: IOException) {
+        transfer.finished = true
+        runCatching { transfer.stream?.close() }
+        transfer.temp.delete()
+        incoming.remove(id)
+        emitTransfer(transfer, "failed", "Phone storage is full.")
+        throw HttpError(Response.Status.INTERNAL_ERROR, "Phone storage is full.")
+      }
       transfer.received += plain.size
       transfer.nextIndex = index + 1
     }
@@ -227,37 +303,43 @@ class RelayServer(
     return plainJson(Response.Status.OK, JSONObject().put("next", transfer.nextIndex))
   }
 
-  private fun completeTransfer(id: String): Response {
+  private fun completeTransfer(session: IHTTPSession, id: String): Response {
+    openOnce("complete:$id", readBody(session, 1024))
     val transfer = incoming[id] ?: throw HttpError(Response.Status.NOT_FOUND, "Transfer not found.")
     synchronized(transfer) {
       if (transfer.finished) return plainJson(Response.Status.OK, JSONObject().put("ok", true))
       if (transfer.received != transfer.size || transfer.nextIndex != transfer.totalChunks) {
         throw HttpError(Response.Status.CONFLICT, "Transfer is incomplete.", JSONObject().put("next", transfer.nextIndex))
       }
-      transfer.stream.fd.sync()
-      transfer.stream.close()
       try {
+        val stream = transfer.stream ?: FileOutputStream(transfer.temp).also { transfer.stream = it }
+        stream.fd.sync()
+        stream.close()
         val saved = RelayFiles.saveToDownloads(context, transfer.temp, transfer.name, transfer.mime)
         transfer.finished = true
         emitTransfer(transfer, "done", null, saved.toString())
       } catch (e: Exception) {
         transfer.finished = true
         transfer.temp.delete()
-        emitTransfer(transfer, "failed", "Could not save the file: ${e.message ?: "storage error"}")
         incoming.remove(id)
-        throw HttpError(Response.Status.INTERNAL_ERROR, "The phone could not save the file.")
+        val full = e is IOException && (e.message?.contains("ENOSPC") == true || e.message?.contains("No space") == true)
+        val message = if (full) "Phone storage is full." else "Could not save the file: ${e.message ?: "storage error"}"
+        emitTransfer(transfer, "failed", message)
+        throw HttpError(Response.Status.INTERNAL_ERROR, message)
       }
     }
     incoming.remove(id)
     return plainJson(Response.Status.OK, JSONObject().put("ok", true))
   }
 
-  private fun cancelTransfer(id: String): Response {
+  /** Cancelling needs a sealed body, so someone who only saw the token cannot kill other uploads. */
+  private fun cancelTransfer(session: IHTTPSession, id: String): Response {
+    openOnce("cancel:$id", readBody(session, 1024))
     val transfer = incoming.remove(id) ?: return plainJson(Response.Status.OK, JSONObject().put("ok", true))
     synchronized(transfer) {
       if (!transfer.finished) {
         transfer.finished = true
-        runCatching { transfer.stream.close() }
+        runCatching { transfer.stream?.close() }
         transfer.temp.delete()
         emitTransfer(transfer, "failed", "Cancelled by the sender.")
       }
@@ -266,7 +348,7 @@ class RelayServer(
   }
 
   private fun receiveText(session: IHTTPSession, peer: String): Response {
-    val body = JSONObject(String(RelayCrypto.open(key, "text", readBody(session, 1024 * 1024)), Charsets.UTF_8))
+    val body = JSONObject(String(openOnce("text", readBody(session, 1024 * 1024)), Charsets.UTF_8))
     emit("onText", mapOf("text" to body.getString("text"), "peer" to peer))
     return plainJson(Response.Status.OK, JSONObject().put("ok", true))
   }
@@ -296,6 +378,10 @@ class RelayServer(
     val path = item.path ?: throw HttpError(Response.Status.BAD_REQUEST, "Not a file.")
     if (index < 0 || index >= item.totalChunks) throw HttpError(Response.Status.BAD_REQUEST, "Bad chunk index.")
 
+    // Chunk 0 starts a new download session with its own progress row.
+    val download = synchronized(downloads) {
+      if (index == 0 || downloads[id] == null) Download("out-$id-${++downloadCounter}", item).also { downloads[id] = it } else downloads.getValue(id)
+    }
     val offset = index.toLong() * RelayFiles.CHUNK_BYTES
     val length = minOf(RelayFiles.CHUNK_BYTES.toLong(), item.size - offset).toInt()
     val buffer = ByteArray(length)
@@ -304,19 +390,24 @@ class RelayServer(
       file.readFully(buffer)
     }
     val sealed = RelayCrypto.seal(key, "out:$id:$index", buffer)
-    val sent = offset + length
-    emit("onTransfer", mapOf(
-      "id" to "out-$id",
-      "direction" to "out",
-      "name" to item.name,
-      "size" to item.size.toDouble(),
-      "bytes" to sent.toDouble(),
-      "status" to (if (sent >= item.size) "done" else "active"),
-      "error" to null,
-      "savedUri" to null
-    ))
+    download.lastActivity = System.currentTimeMillis()
+    download.sent = offset + length
+    emitDownload(download, "active", null)
     return newFixedLengthResponse(Response.Status.OK, "application/octet-stream", ByteArrayInputStream(sealed), sealed.size.toLong())
       .apply { addHeader("Cache-Control", "no-store") }
+  }
+
+  /** The browser reports when a download finished or stopped, so the phone never guesses. */
+  private fun ackDownload(session: IHTTPSession, id: String): Response {
+    val body = JSONObject(String(openOnce("ack:$id", readBody(session, 4096)), Charsets.UTF_8))
+    val download = downloads.remove(id) ?: return plainJson(Response.Status.OK, JSONObject().put("ok", true))
+    if (body.optBoolean("ok")) {
+      download.sent = download.item.size
+      emitDownload(download, "done", null)
+    } else {
+      emitDownload(download, "failed", body.optString("error", "Stopped on the other device."))
+    }
+    return plainJson(Response.Status.OK, JSONObject().put("ok", true))
   }
 
   // ---- helpers -------------------------------------------------------------------------------
@@ -331,6 +422,19 @@ class RelayServer(
       "status" to status,
       "error" to error,
       "savedUri" to savedUri
+    ))
+  }
+
+  private fun emitDownload(download: Download, status: String, error: String?) {
+    emit("onTransfer", mapOf(
+      "id" to download.eventId,
+      "direction" to "out",
+      "name" to download.item.name,
+      "size" to download.item.size.toDouble(),
+      "bytes" to download.sent.toDouble(),
+      "status" to status,
+      "error" to error,
+      "savedUri" to null
     ))
   }
 
@@ -369,5 +473,7 @@ class RelayServer(
   companion object {
     private const val PAIRING_TTL_MS = 3 * 60 * 1000L
     private const val MAX_PAIRINGS = 16
+    private const val MAX_ACTIVE_INCOMING = 4
+    private const val IDLE_MS = 60 * 1000L
   }
 }

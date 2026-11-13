@@ -1,14 +1,15 @@
-import { Button, Card, ListItem, Pressable, Screen, SegmentedControl, Text, toMessage, useTheme, useToast } from '@basalt/core';
+import { Appear, Badge, Button, Card, Header, ListItem, Pressable, Screen, SegmentedControl, Text, toMessage, useTheme, useToast } from '@basalt/core';
+import { useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { useKeepAwake } from 'expo-keep-awake';
-import { ClipboardPaste, Copy, FileText, Laptop, MonitorSmartphone, Plus, RefreshCw, Type, WifiOff, X } from 'lucide-react-native';
+import { ClipboardPaste, Copy, FileText, Laptop, Maximize2, MonitorSmartphone, Plus, RefreshCw, Type, WifiOff, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Modal, View, useWindowDimensions } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import RelayTransfer from '../../modules/relay-transfer';
 import type { SessionInfo } from '../../modules/relay-transfer';
-import { Header } from '../components/Header';
+import { deletePickedCopies } from '../lib/cleanup';
 import { TransferRow } from '../components/TransferRow';
 import { QrScanner } from '../components/QrScanner';
 import { buildPairingUrl, parseLinkCode } from '../lib/pairing';
@@ -19,6 +20,7 @@ interface Shared {
   id: string;
   label: string;
   kind: 'file' | 'text';
+  uri?: string;
 }
 
 type Phase = { status: 'starting' } | { status: 'error'; message: string } | { status: 'ready'; session: SessionInfo };
@@ -32,6 +34,11 @@ export default function Receive() {
   const [shared, setShared] = useState<Shared[]>([]);
   const [busy, setBusy] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const router = useRouter();
+  const { width } = useWindowDimensions();
+  const sharedRef = React.useRef<Shared[]>([]);
+  sharedRef.current = shared;
   const transfers = useRelay((s) => s.transfers);
   const texts = useRelay((s) => s.texts);
   const peers = useRelay((s) => s.peers);
@@ -45,7 +52,8 @@ export default function Receive() {
       setAddressIndex(0);
       setPhase({ status: 'ready', session });
     } catch (error) {
-      setPhase({ status: 'error', message: toMessage(error, 'Could not start receiving.') });
+      const message = toMessage(error, 'Could not start receiving.');
+      if (message !== 'The session was closed.') setPhase({ status: 'error', message });
     }
   }, []);
 
@@ -57,6 +65,7 @@ export default function Receive() {
       } catch {
         // The session is gone either way.
       }
+      deletePickedCopies(sharedRef.current.flatMap((s) => (s.uri ? [s.uri] : [])));
     };
   }, [start]);
 
@@ -73,7 +82,7 @@ export default function Receive() {
       const added: Shared[] = [];
       for (const asset of result.assets) {
         const id = RelayTransfer.shareFile({ uri: asset.uri, name: asset.name, mime: asset.mimeType ?? '' });
-        added.push({ id, label: asset.name, kind: 'file' });
+        added.push({ id, label: asset.name, kind: 'file', uri: asset.uri });
       }
       setShared((list) => [...added, ...list]);
       toast(`${added.length} file${added.length === 1 ? '' : 's'} ready to download on the other device`, 'success');
@@ -110,7 +119,9 @@ export default function Receive() {
 
   const unshare = (id: string) => {
     RelayTransfer.unshare(id);
-    setShared((list) => list.filter((item) => item.id !== id));
+    const item = shared.find((s) => s.id === id);
+    if (item?.uri) deletePickedCopies([item.uri]);
+    setShared((list) => list.filter((s) => s.id !== id));
   };
 
   const copy = async (text: string, message: string) => {
@@ -119,8 +130,15 @@ export default function Receive() {
   };
 
   return (
-    <Screen>
-      <Header title="Receive" subtitle={peers.length > 0 ? `${peers.length} device${peers.length === 1 ? '' : 's'} connected` : 'Waiting for a device'} />
+    <Screen aurora>
+      <Header title="Receive" subtitle={peers.length > 0 ? `${peers.length} device${peers.length === 1 ? '' : 's'} connected` : 'Waiting for a device'} onBack={() => router.back()} />
+      {peers.length > 0 ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
+          {peers.map((p) => (
+            <Badge key={p} label={`Connected · ${p}`} tone="success" />
+          ))}
+        </View>
+      ) : null}
 
       {phase.status === 'starting' ? (
         <Card style={{ alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xxxl }}>
@@ -152,10 +170,14 @@ export default function Receive() {
 
       {session && url && address ? (
         <>
-          <Card style={{ alignItems: 'center', gap: spacing.lg }}>
-            <View accessible accessibilityLabel="Pairing QR code" style={{ padding: spacing.lg, backgroundColor: '#FFFFFF', borderRadius: radius.lg }}>
-              <QRCode value={url} size={208} backgroundColor="#FFFFFF" color="#0B0D10" ecl="M" />
-            </View>
+          <Appear index={0}>
+          <Card variant="glow" style={{ alignItems: 'center', gap: spacing.lg }}>
+            <Pressable accessibilityRole="imagebutton" accessibilityLabel="Pairing QR code. Tap to show it full screen." onPress={() => setFullscreen(true)} style={{ padding: spacing.lg, backgroundColor: '#FFFFFF', borderRadius: radius.lg }}>
+              <QRCode value={url} size={212} backgroundColor="#FFFFFF" color="#0B0D10" ecl="M" />
+              <View style={{ position: 'absolute', right: 8, bottom: 8 }}>
+                <Maximize2 size={16} color="#0B0D10" />
+              </View>
+            </Pressable>
             <View style={{ gap: 4, alignItems: 'center' }}>
               <Text variant="bodyStrong" align="center">
                 Scan with Relay or any phone camera
@@ -186,6 +208,15 @@ export default function Receive() {
               <Copy size={16} color={colors.accent} />
             </Pressable>
           </Card>
+          </Appear>
+          <Modal visible={fullscreen} animationType="fade" onRequestClose={() => setFullscreen(false)} statusBarTranslucent>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close full-screen code" onPress={() => setFullscreen(false)} pressScale={1} style={{ flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: spacing.xl }}>
+              <QRCode value={url} size={Math.min(width - 48, 420)} backgroundColor="#FFFFFF" color="#000000" ecl="M" />
+              <Text variant="label" style={{ color: '#55606E' }}>
+                Tap anywhere to close
+              </Text>
+            </Pressable>
+          </Modal>
 
           {linking ? (
             <Card style={{ gap: spacing.md }}>

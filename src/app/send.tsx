@@ -1,4 +1,5 @@
-import { Button, Card, EmptyState, ListItem, Pressable, Screen, Text, formatBytes, toMessage, useTheme, useToast } from '@basalt/core';
+import { Appear, Button, Card, EmptyState, Header, ListItem, Pressable, Ring, Screen, Text, formatBytes, toMessage, useTheme, useToast } from '@basalt/core';
+import { deletePickedCopies } from '../lib/cleanup';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -7,7 +8,6 @@ import { CircleCheck, ClipboardPaste, FileText, Files, Plus, ScanLine, Smartphon
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import RelayTransfer from '../../modules/relay-transfer';
-import { Header } from '../components/Header';
 import { QrScanner } from '../components/QrScanner';
 import { TransferRow } from '../components/TransferRow';
 import { parsePairing } from '../lib/pairing';
@@ -40,6 +40,8 @@ export default function Send() {
   const [step, setStep] = useState<Step>({ name: 'pick' });
   const transfers = useRelay((s) => s.transfers);
   const mounted = useRef(true);
+  const filesRef = useRef<Picked[]>([]);
+  filesRef.current = files;
 
   useEffect(() => {
     useRelay.getState().resetSession();
@@ -50,6 +52,7 @@ export default function Send() {
       } catch {
         // Nothing in flight.
       }
+      deletePickedCopies(filesRef.current.map((f) => f.uri));
     };
   }, []);
 
@@ -107,7 +110,8 @@ export default function Send() {
       }
       if (mounted.current) setStep({ name: 'done', peer, sent, failed });
     } catch (error) {
-      if (mounted.current) setStep({ name: 'error', message: toMessage(error, 'Could not reach the other device.') });
+      const message = toMessage(error, 'Could not reach the other device.');
+      if (mounted.current) setStep(message === 'Cancelled.' ? { name: 'pick' } : { name: 'error', message });
     }
   };
 
@@ -118,6 +122,7 @@ export default function Send() {
   };
 
   const reset = () => {
+    deletePickedCopies(files.map((f) => f.uri));
     setFiles([]);
     setText(null);
     useRelay.getState().resetSession();
@@ -126,6 +131,7 @@ export default function Send() {
 
   return (
     <Screen
+      aurora
       footer={
         step.name === 'pick' ? (
           <Button label={hasPayload ? 'Scan receiver’s code' : 'Choose something to send'} icon={ScanLine} size="lg" disabled={!hasPayload} onPress={() => setStep({ name: 'scan' })} />
@@ -138,12 +144,14 @@ export default function Send() {
           </View>
         ) : step.name === 'error' ? (
           <Button label="Scan again" icon={ScanLine} size="lg" onPress={() => setStep({ name: 'scan' })} />
+        ) : step.name === 'connecting' ? (
+          <Button label="Cancel" variant="secondary" size="lg" onPress={() => RelayTransfer.cancelSend()} />
         ) : step.name === 'scan' ? (
           <Button label="Back to selection" variant="secondary" size="lg" onPress={() => setStep({ name: 'pick' })} />
         ) : undefined
       }
     >
-      <Header title="Send" subtitle={hasPayload ? `${files.length} file${files.length === 1 ? '' : 's'}${text != null ? ' + text' : ''} · ${formatBytes(totalBytes)}` : 'Phone to phone'} />
+      <Header title="Send" subtitle={hasPayload ? `${files.length} file${files.length === 1 ? '' : 's'}${text != null ? ' + text' : ''} · ${formatBytes(totalBytes)}` : 'Phone to phone'} onBack={() => router.back()} />
 
       {step.name === 'pick' ? (
         <>
@@ -174,7 +182,15 @@ export default function Send() {
                   subtitle={formatBytes(file.size)}
                   icon={FileText}
                   trailing={
-                    <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${file.name}`} hitSlop={12} onPress={() => setFiles((list) => list.filter((_, i) => i !== index))}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${file.name}`}
+                      hitSlop={12}
+                      onPress={() => {
+                        deletePickedCopies([file.uri]);
+                        setFiles((list) => list.filter((_, i) => i !== index));
+                      }}
+                    >
                       <X size={18} color={colors.textFaint} />
                     </Pressable>
                   }
@@ -203,8 +219,15 @@ export default function Send() {
 
       {step.name === 'sending' || step.name === 'done' ? (
         <>
-          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
-            {step.name === 'done' && step.failed === 0 ? <CircleCheck size={22} color={colors.success} /> : <Smartphone size={22} color={colors.accent} />}
+          <Card variant={step.name === 'done' && step.failed === 0 ? 'glow' : 'raised'} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
+            <Ring
+              progress={outgoing.length ? outgoing.filter((t) => t.status === 'done').length / outgoing.length : step.name === 'done' ? 1 : 0}
+              size={56}
+              stroke={6}
+              tone={step.name === 'done' && step.failed > 0 ? 'danger' : step.name === 'done' ? 'success' : 'accent'}
+            >
+              {step.name === 'done' && step.failed === 0 ? <CircleCheck size={22} color={colors.success} /> : <Smartphone size={20} color={colors.accent} />}
+            </Ring>
             <View style={{ flex: 1 }}>
               <Text variant="bodyStrong">{step.peer}</Text>
               <Text variant="caption" color={step.name === 'done' && step.failed > 0 ? 'danger' : 'textMuted'}>
@@ -216,8 +239,10 @@ export default function Send() {
               </Text>
             </View>
           </Card>
-          {outgoing.map((transfer) => (
-            <TransferRow key={transfer.id} transfer={transfer} />
+          {outgoing.map((transfer, i) => (
+            <Appear key={transfer.id} index={i}>
+              <TransferRow transfer={transfer} />
+            </Appear>
           ))}
         </>
       ) : null}

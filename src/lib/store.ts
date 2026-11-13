@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import RelayTransfer from '../../modules/relay-transfer';
 import type { TransferEvent } from '../../modules/relay-transfer';
+import * as Clipboard from 'expo-clipboard';
 import { addHistory, clearHistory, listHistory } from './history';
+import { autoCopySetting } from './settings';
 import type { HistoryEntry } from './history';
 
 export interface LiveTransfer extends TransferEvent {
@@ -47,6 +49,7 @@ export const useRelay = create<RelayState>((set) => ({
 }));
 
 let subscribed = false;
+let textCounter = 0;
 
 /** Wire native events into the store once for the lifetime of the app. */
 export function subscribeToRelayEvents(): void {
@@ -79,8 +82,9 @@ export function subscribeToRelayEvents(): void {
   });
 
   RelayTransfer.addListener('onText', (event) => {
+    if (autoCopySetting.get()) Clipboard.setStringAsync(event.text).catch(() => {});
     useRelay.setState((state) => ({
-      texts: [{ id: `${Date.now()}-${state.texts.length}`, text: event.text, at: Date.now() }, ...state.texts].slice(0, 50),
+      texts: [{ id: `text-${++textCounter}`, text: event.text, at: Date.now() }, ...state.texts].slice(0, 50),
     }));
   });
 

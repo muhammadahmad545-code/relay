@@ -79,11 +79,13 @@ export function completeLink(request: LinkRequest, phonePublicKey: string, seale
   return key;
 }
 
-/** Poll until the phone has scanned the code. Resolves with the session key. */
-export async function waitForLink(baseUrl: string, request: LinkRequest, signal?: AbortSignal): Promise<Uint8Array> {
+/** Poll until the phone has scanned the code. Resolves with the session key; gives up after `timeoutMs`. */
+export async function waitForLink(baseUrl: string, request: LinkRequest, signal?: AbortSignal, timeoutMs = 3 * 60 * 1000): Promise<Uint8Array> {
   const base = baseUrl.replace(/\/+$/, '');
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (signal?.aborted) throw new RelayError('Cancelled.');
+    if (Date.now() > deadline) throw new RelayError('The phone did not link in time. Reload this page to get a new code.');
     try {
       const response = await fetch(`${base}/pair/${request.id}`, { cache: 'no-store', signal });
       if (response.ok) {
@@ -266,11 +268,11 @@ export class RelayClient {
           await this.fail(response, 'The phone rejected the data.');
         }
       }
-      const done = await this.request('POST', `/api/transfers/${id}/complete`, new Uint8Array(0), signal);
+      const done = await this.request('POST', `/api/transfers/${id}/complete`, seal(this.key, `complete:${id}`, encoder.encode('{}')), signal);
       if (!done.ok) await this.fail(done, 'The phone could not save the file.');
       onProgress?.(source.size, source.size);
     } catch (error) {
-      this.request('POST', `/api/transfers/${id}/cancel`, new Uint8Array(0)).catch(() => {});
+      this.request('POST', `/api/transfers/${id}/cancel`, seal(this.key, `cancel:${id}`, encoder.encode('{}'))).catch(() => {});
       throw error;
     }
   }
@@ -286,9 +288,18 @@ export class RelayClient {
     }
   }
 
-  /** Download a file the phone is sharing. Returns the decrypted chunks in order. */
-  async download(item: OutboxItem, control: TransferControl = {}): Promise<Uint8Array[]> {
-    const { onProgress, signal } = control;
+  /** Tell the phone how a download ended, so its progress row finishes correctly. */
+  async ack(item: OutboxItem, ok: boolean, error?: string): Promise<void> {
+    const body = seal(this.key, `ack:${item.id}`, encoder.encode(JSON.stringify({ ok, error: error ?? '' })));
+    await this.request('POST', `/api/outbox/${item.id}/ack`, body).catch(() => {});
+  }
+
+  /**
+   * Download a file the phone is sharing. With `onChunk`, each decrypted chunk is handed over as it
+   * arrives (stream to disk) and nothing is kept in memory; otherwise the chunks are returned.
+   */
+  async download(item: OutboxItem, control: TransferControl & { onChunk?: (chunk: Uint8Array) => Promise<void> } = {}): Promise<Uint8Array[]> {
+    const { onProgress, signal, onChunk } = control;
     const chunks: Uint8Array[] = [];
     let received = 0;
     for (let index = 0; index < item.totalChunks; index++) {
@@ -299,7 +310,8 @@ export class RelayClient {
           const response = await this.request('GET', `/api/outbox/${item.id}/chunks/${index}`, undefined, signal);
           if (!response.ok) await this.fail(response, 'The phone stopped sharing this file.');
           const plain = open(this.key, `out:${item.id}:${index}`, new Uint8Array(await response.arrayBuffer()));
-          chunks.push(plain);
+          if (onChunk) await onChunk(plain);
+          else chunks.push(plain);
           received += plain.length;
           onProgress?.(received, item.size);
           break;

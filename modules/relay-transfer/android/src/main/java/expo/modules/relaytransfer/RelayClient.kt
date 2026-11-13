@@ -10,17 +10,17 @@ import javax.crypto.AEADBadTagException
 
 class RelayCancelled : Exception("Cancelled.")
 
-/** Raised with a message that is safe to show to the user. */
+/** Raised with a message that is safe to show to the user. The app strips Expo's wrapper text before showing it. */
 class RelayFailure(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 private class HttpResult(val status: Int, val body: ByteArray)
 
 /** Phone-to-phone sender: talks to another phone's RelayServer using the same encrypted protocol. */
-class RelayClient(baseUrl: String, private val key: ByteArray) {
+class RelayClient(baseUrl: String, private val key: ByteArray, private val isCancelled: () -> Boolean = { false }) {
   private val base = baseUrl.trimEnd('/')
   private val token = RelayCrypto.token(key)
 
-  @Volatile var cancelled = false
+  val cancelled: Boolean get() = isCancelled()
 
   fun hello(): String {
     val result = request("GET", "/api/hello", null)
@@ -88,12 +88,13 @@ class RelayClient(baseUrl: String, private val key: ByteArray) {
           }
         }
       }
-      val done = request("POST", "/api/transfers/$id/complete", ByteArray(0))
+      // Saving a multi-GB file into Downloads can take minutes on the receiver: allow for it.
+      val done = request("POST", "/api/transfers/$id/complete", RelayCrypto.seal(key, "complete:$id", "{}".toByteArray()), readTimeoutMs = 15 * 60 * 1000)
       if (done.status != 200) throw RelayFailure(errorOf(done, "The other device could not save the file."))
       onProgress(size, size)
     } catch (e: Exception) {
       // Best effort: let the receiver discard the partial file.
-      runCatching { request("POST", "/api/transfers/$id/cancel", ByteArray(0)) }
+      runCatching { request("POST", "/api/transfers/$id/cancel", RelayCrypto.seal(key, "cancel:$id", "{}".toByteArray())) }
       throw e
     }
   }
@@ -117,12 +118,12 @@ class RelayClient(baseUrl: String, private val key: ByteArray) {
     fallback
   }
 
-  private fun request(method: String, path: String, body: ByteArray?): HttpResult {
+  private fun request(method: String, path: String, body: ByteArray?, readTimeoutMs: Int = 30_000): HttpResult {
     val connection = URL(base + path).openConnection() as HttpURLConnection
     try {
       connection.requestMethod = method
       connection.connectTimeout = 6_000
-      connection.readTimeout = 30_000
+      connection.readTimeout = readTimeoutMs
       connection.useCaches = false
       connection.setRequestProperty("X-Relay-Token", token)
       if (body != null) {

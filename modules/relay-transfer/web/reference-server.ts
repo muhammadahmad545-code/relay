@@ -43,6 +43,7 @@ export interface ReferenceServer {
   outbox: { id: string; kind: 'file' | 'text'; name: string; mime: string; data: Buffer; text: string | null }[];
   /** Make the next N chunk uploads drop the connection after the data was stored. */
   dropAfterStore: number;
+  acks: { id: string; ok: boolean; error: string }[];
   /** What the phone does after scanning a browser's link code. Mirrors RelayCrypto.linkResponse. */
   link(code: string): void;
   close(): Promise<void>;
@@ -62,6 +63,15 @@ export async function startReferenceServer(html?: string): Promise<ReferenceServ
   const token = nodeToken(key);
   const incoming = new Map<string, Incoming>();
   const pairings = new Map<string, { pub: string; sealed: string }>();
+  const seen = new Set<string>();
+  /** Mirrors RelayServer.openOnce: decrypt and refuse any nonce seen before in this session. */
+  const openOnce = (aad: string, body: Buffer) => {
+    const plain = nodeOpen(key, aad, body);
+    const nonce = body.subarray(0, 12).toString('hex');
+    if (seen.has(nonce)) throw Object.assign(new Error('replay'), { replay: true });
+    seen.add(nonce);
+    return plain;
+  };
   const state: ReferenceServer = {
     server: undefined as unknown as Server,
     url: '',
@@ -70,6 +80,7 @@ export async function startReferenceServer(html?: string): Promise<ReferenceServ
     texts: [],
     outbox: [],
     dropAfterStore: 0,
+    acks: [],
     link: (code: string) => {
       const [, id, pub] = /^relay-link:([A-Za-z0-9_-]{12}):([A-Za-z0-9_-]{87})$/.exec(code) ?? [];
       if (!id) throw new Error('bad link code');
@@ -101,7 +112,6 @@ export async function startReferenceServer(html?: string): Promise<ReferenceServ
       if (req.method === 'GET' && path.startsWith('/pair/')) {
         const pairing = pairings.get(path.slice(6));
         if (!pairing) return json(res, 404, { error: 'Not linked yet.' });
-        pairings.delete(path.slice(6));
         return json(res, 200, pairing);
       }
       if (!path.startsWith('/api/')) return json(res, 404, { error: 'Not found.' });
@@ -111,11 +121,11 @@ export async function startReferenceServer(html?: string): Promise<ReferenceServ
 
       if (m === 'GET' && path === '/api/hello') return sealed(res, 'hello', { name: 'Reference', protocol: 1, chunkBytes: CHUNK });
       if (m === 'POST' && path === '/api/text') {
-        state.texts.push(JSON.parse(nodeOpen(key, 'text', body).toString()).text);
+        state.texts.push(JSON.parse(openOnce('text', body).toString()).text);
         return json(res, 200, { ok: true });
       }
       if (m === 'POST' && path === '/api/transfers') {
-        const meta = JSON.parse(nodeOpen(key, 'meta', body).toString());
+        const meta = JSON.parse(openOnce('meta', body).toString());
         const id = randomBytes(9).toString('base64url');
         incoming.set(id, { name: meta.name, size: meta.size, parts: [], next: 0, received: 0 });
         return sealed(res, 'meta-res', { id, chunkBytes: CHUNK });
@@ -140,12 +150,14 @@ export async function startReferenceServer(html?: string): Promise<ReferenceServ
           return json(res, 200, { next: t.next });
         }
         if (m === 'POST' && parts[2] === 'complete') {
+          openOnce(`complete:${id}`, body);
           if (t.received !== t.size) return json(res, 409, { error: 'Transfer is incomplete.', next: t.next });
           state.received.set(id, { name: t.name, data: Buffer.concat(t.parts) });
           incoming.delete(id);
           return json(res, 200, { ok: true });
         }
         if (m === 'POST' && parts[2] === 'cancel') {
+          openOnce(`cancel:${id}`, body);
           incoming.delete(id);
           return json(res, 200, { ok: true });
         }
@@ -154,6 +166,10 @@ export async function startReferenceServer(html?: string): Promise<ReferenceServ
         return sealed(res, 'outbox', {
           items: state.outbox.map((o) => ({ id: o.id, kind: o.kind, name: o.name, mime: o.mime, size: o.data.length, totalChunks: Math.ceil(o.data.length / CHUNK), text: o.text })),
         });
+      }
+      if (m === 'POST' && parts[0] === 'outbox' && parts[2] === 'ack') {
+        state.acks.push({ id: parts[1], ...JSON.parse(openOnce(`ack:${parts[1]}`, body).toString()) });
+        return json(res, 200, { ok: true });
       }
       if (m === 'GET' && parts[0] === 'outbox' && parts[2] === 'chunks') {
         const item = state.outbox.find((o) => o.id === parts[1]);
@@ -164,7 +180,8 @@ export async function startReferenceServer(html?: string): Promise<ReferenceServ
         return res.end(nodeSeal(key, `out:${item.id}:${index}`, slice));
       }
       return json(res, 404, { error: 'Not found.' });
-    } catch {
+    } catch (error) {
+      if ((error as { replay?: boolean }).replay) return json(res, 400, { error: 'This request was already used.' });
       return json(res, 400, { error: 'Decryption failed. Scan the QR code again.' });
     }
   });

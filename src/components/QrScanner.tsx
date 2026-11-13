@@ -2,8 +2,8 @@ import { Button, Text, useTheme } from '@basalt/core';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { Camera } from 'lucide-react-native';
-import React, { useCallback, useRef, useState } from 'react';
-import { Linking, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Linking, View } from 'react-native';
 
 export interface QrScannerProps {
   /** Return an error message to reject the code and keep scanning, or nothing to accept it. */
@@ -13,7 +13,15 @@ export interface QrScannerProps {
 
 export function QrScanner({ onScan, hint }: QrScannerProps) {
   const { colors, spacing, radius } = useTheme();
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
+
+  // Coming back from Settings after granting the camera should show the camera, not the prompt.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void getPermission();
+    });
+    return () => sub.remove();
+  }, [getPermission]);
   const [problem, setProblem] = useState<string | null>(null);
   const accepted = useRef(false);
   const lastRejected = useRef<{ data: string; at: number } | null>(null);

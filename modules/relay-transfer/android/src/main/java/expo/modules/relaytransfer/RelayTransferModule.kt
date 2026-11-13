@@ -10,6 +10,7 @@ import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 class OutgoingFile : Record {
   @Field var uri: String = ""
@@ -19,9 +20,11 @@ class OutgoingFile : Record {
 
 class RelayTransferModule : Module() {
   private var server: RelayServer? = null
-  private var sessionKey: ByteArray? = null
-  private var activeClient: RelayClient? = null
-  private val worker = Executors.newSingleThreadExecutor()
+  /** Bumped by stop(): a start() that finishes after the user already left shuts its server down. */
+  private val serverGeneration = AtomicInteger(0)
+  /** Bumped by cancelSend(): every send job checks it between steps. */
+  private val sendGeneration = AtomicInteger(0)
+  private val worker = Executors.newCachedThreadPool()
 
   private val context: Context
     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
@@ -35,10 +38,11 @@ class RelayTransferModule : Module() {
 
   @Synchronized
   private fun stopServer() {
+    serverGeneration.incrementAndGet()
     server?.shutdown()
     server = null
-    sessionKey = null
     runCatching { RelayFiles.clearTemp(context) }
+    runCatching { TransferService.release(context, "session") }
   }
 
   override fun definition() = ModuleDefinition {
@@ -53,30 +57,40 @@ class RelayTransferModule : Module() {
     Function("isRunning") { server != null }
 
     /** Opens a receiving session. Returns everything the UI needs to build the QR code. */
-    AsyncFunction("start") { deviceName: String ->
+    AsyncFunction("start") { deviceName: String, promise: Promise ->
       stopServer()
-      val key = RelayCrypto.newKey()
-      var started: RelayServer? = null
-      var lastError: Exception? = null
-      // Prefer a stable port so a bookmarked address keeps working, but never fail just because it is taken.
-      for (port in intArrayOf(8765, 8766, 8767, 0)) {
-        try {
-          val candidate = RelayServer(context, port, key, deviceName, ::emit)
-          candidate.start(30_000, true)
-          started = candidate
-          break
-        } catch (e: Exception) {
-          lastError = e
+      val generation = serverGeneration.get()
+      worker.execute {
+        val key = RelayCrypto.newKey()
+        var started: RelayServer? = null
+        var lastError: Exception? = null
+        // Prefer a stable port so a bookmarked address keeps working, but never fail just because it is taken.
+        for (port in intArrayOf(8765, 8766, 8767, 0)) {
+          try {
+            val candidate = RelayServer(context, port, key, deviceName, ::emit)
+            candidate.start(30_000, true)
+            started = candidate
+            break
+          } catch (e: Exception) {
+            lastError = e
+          }
         }
+        val running = started ?: return@execute promise.reject("ERR_RELAY", "Could not start receiving: ${lastError?.message ?: "no free port"}", lastError)
+        synchronized(this@RelayTransferModule) {
+          if (serverGeneration.get() != generation) {
+            // The user left the Receive screen while we were starting: do not leave a server behind.
+            running.shutdown()
+            return@execute promise.reject("ERR_RELAY_CANCELLED", "The session was closed.", null)
+          }
+          server = running
+        }
+        TransferService.acquire(context, "session", "Relay is receiving")
+        promise.resolve(mapOf(
+          "port" to running.listeningPort,
+          "addresses" to RelayFiles.localAddresses(),
+          "key" to RelayCrypto.encodeKey(key)
+        ))
       }
-      val running = started ?: throw RelayFailure("Could not start receiving: ${lastError?.message ?: "no free port"}")
-      server = running
-      sessionKey = key
-      mapOf(
-        "port" to running.listeningPort,
-        "addresses" to RelayFiles.localAddresses(),
-        "key" to RelayCrypto.encodeKey(key)
-      )
     }
 
     Function("stop") { stopServer() }
@@ -122,9 +136,12 @@ class RelayTransferModule : Module() {
 
     /** Checks that the other phone is reachable and the scanned key is right. Resolves with its name. */
     AsyncFunction("connect") { baseUrl: String, key: String, promise: Promise ->
+      val generation = sendGeneration.get()
       worker.execute {
         try {
-          promise.resolve(RelayClient(baseUrl, RelayCrypto.decodeKey(key)).hello())
+          val name = RelayClient(baseUrl, RelayCrypto.decodeKey(key)).hello()
+          if (sendGeneration.get() != generation) promise.reject("ERR_RELAY_CANCELLED", "Cancelled.", null)
+          else promise.resolve(name)
         } catch (e: RelayFailure) {
           promise.reject("ERR_RELAY", e.message, e)
         } catch (e: IllegalArgumentException) {
@@ -136,56 +153,62 @@ class RelayTransferModule : Module() {
     }
 
     AsyncFunction("sendFiles") { baseUrl: String, key: String, files: List<OutgoingFile>, promise: Promise ->
+      val generation = sendGeneration.get()
       worker.execute {
         val client = try {
-          RelayClient(baseUrl, RelayCrypto.decodeKey(key))
+          RelayClient(baseUrl, RelayCrypto.decodeKey(key)) { sendGeneration.get() != generation }
         } catch (e: Exception) {
           promise.reject("ERR_RELAY", e.message, e)
           return@execute
         }
-        activeClient = client
+        TransferService.acquire(context, "send", "Relay is sending")
         var failures = 0
-        files.forEachIndexed { position, file ->
-          val id = "send-${System.currentTimeMillis()}-$position"
-          val size = File(localPath(file.uri)).length()
-          fun report(status: String, bytes: Long, error: String?) = emit("onTransfer", mapOf(
-            "id" to id,
-            "direction" to "out",
-            "name" to file.name,
-            "size" to size.toDouble(),
-            "bytes" to bytes.toDouble(),
-            "status" to status,
-            "error" to error,
-            "savedUri" to null
-          ))
-          if (client.cancelled) {
-            report("failed", 0, "Cancelled.")
-            failures++
-            return@forEachIndexed
+        try {
+          files.forEachIndexed { position, file ->
+            val id = "send-${System.currentTimeMillis()}-$position"
+            val size = File(localPath(file.uri)).length()
+            fun report(status: String, bytes: Long, error: String?) = emit("onTransfer", mapOf(
+              "id" to id,
+              "direction" to "out",
+              "name" to file.name,
+              "size" to size.toDouble(),
+              "bytes" to bytes.toDouble(),
+              "status" to status,
+              "error" to error,
+              "savedUri" to null
+            ))
+            if (client.cancelled) {
+              report("failed", 0, "Cancelled.")
+              failures++
+              return@forEachIndexed
+            }
+            report("active", 0, null)
+            try {
+              client.sendFile(localPath(file.uri), file.name, file.mime) { sent, _ -> report("active", sent, null) }
+              report("done", size, null)
+            } catch (e: RelayCancelled) {
+              failures++
+              report("failed", 0, "Cancelled.")
+            } catch (e: RelayFailure) {
+              failures++
+              report("failed", 0, e.message)
+            } catch (e: Exception) {
+              failures++
+              report("failed", 0, "Could not reach the other device.")
+            }
           }
-          report("active", 0, null)
-          try {
-            client.sendFile(localPath(file.uri), file.name, file.mime) { sent, _ -> report("active", sent, null) }
-            report("done", size, null)
-          } catch (e: RelayCancelled) {
-            failures++
-            report("failed", 0, "Cancelled.")
-          } catch (e: RelayFailure) {
-            failures++
-            report("failed", 0, e.message)
-          } catch (e: Exception) {
-            failures++
-            report("failed", 0, "Could not reach the other device.")
-          }
+        } finally {
+          TransferService.release(context, "send")
         }
-        activeClient = null
         promise.resolve(mapOf("sent" to files.size - failures, "failed" to failures))
       }
     }
 
     AsyncFunction("sendText") { baseUrl: String, key: String, text: String, promise: Promise ->
+      val generation = sendGeneration.get()
       worker.execute {
         try {
+          if (sendGeneration.get() != generation) return@execute promise.reject("ERR_RELAY_CANCELLED", "Cancelled.", null)
           RelayClient(baseUrl, RelayCrypto.decodeKey(key)).sendText(text)
           promise.resolve(null)
         } catch (e: RelayFailure) {
@@ -196,11 +219,13 @@ class RelayTransferModule : Module() {
       }
     }
 
-    Function("cancelSend") { activeClient?.cancelled = true }
+    /** Cancels whatever send is in progress: connecting, sending text, or any file in the queue. */
+    Function("cancelSend") { sendGeneration.incrementAndGet() }
 
     OnDestroy {
       stopServer()
-      worker.shutdownNow()
+      sendGeneration.incrementAndGet()
+      worker.shutdown()
     }
   }
 }

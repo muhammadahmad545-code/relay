@@ -97,7 +97,7 @@ function link() {
   setStatus('wait', 'Waiting for the phone');
   waitForLink(location.origin, request)
     .then((key) => {
-      history.replaceState(null, '', `#k=${toBase64Url(key)}`);
+      remember(toBase64Url(key));
       $('link').hidden = true;
       start();
     })
@@ -107,9 +107,46 @@ function link() {
     });
 }
 
+const KEY_SLOT = 'relay-session-key';
+
+/** Keep the key out of the address bar (and so out of browser history), but survive a reload. */
+function remember(encoded: string) {
+  try {
+    sessionStorage.setItem(KEY_SLOT, encoded);
+  } catch {
+    // Private mode: the key stays only in memory for this page.
+  }
+  memoryKey = encoded;
+  history.replaceState(null, '', location.pathname);
+}
+
+let memoryKey: string | null = null;
+
+function recall(): string | null {
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get('k');
+  if (fromHash) {
+    remember(fromHash);
+    return fromHash;
+  }
+  if (memoryKey) return memoryKey;
+  try {
+    return sessionStorage.getItem(KEY_SLOT);
+  } catch {
+    return null;
+  }
+}
+
+function forget() {
+  memoryKey = null;
+  try {
+    sessionStorage.removeItem(KEY_SLOT);
+  } catch {
+    // Ignore.
+  }
+}
+
 function start() {
-  const params = new URLSearchParams(location.hash.slice(1));
-  const encoded = params.get('k');
+  const encoded = recall();
   if (!encoded) return link();
   let client: RelayClient;
   try {
@@ -250,28 +287,46 @@ function start() {
       controller = new AbortController();
       row.action.textContent = 'Cancel';
       row.root.dataset.state = '';
+      const progress = (bytes: number, total: number) => {
+        row.bar.style.width = `${total ? (bytes / total) * 100 : 100}%`;
+        row.meta.textContent = `${formatBytes(bytes)} of ${formatBytes(total)}`;
+      };
       try {
-        const chunks = await client.download(item, {
-          signal: controller.signal,
-          onProgress: (bytes, total) => {
-            row.bar.style.width = `${total ? (bytes / total) * 100 : 100}%`;
-            row.meta.textContent = `${formatBytes(bytes)} of ${formatBytes(total)}`;
-          },
-        });
-        const url = URL.createObjectURL(new Blob(chunks as BlobPart[], { type: item.mime || 'application/octet-stream' }));
-        const link = el('a');
-        link.href = url;
-        link.download = item.name;
-        document.body.append(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        const picker = (window as unknown as { showSaveFilePicker?: (o: { suggestedName: string }) => Promise<{ createWritable: () => Promise<{ write: (d: Uint8Array) => Promise<void>; close: () => Promise<void>; abort: () => Promise<void> }> }> }).showSaveFilePicker;
+        if (picker) {
+          // Chrome and Edge: stream straight to disk, so even very large files use no extra memory.
+          const handle = await picker({ suggestedName: item.name });
+          const writable = await handle.createWritable();
+          try {
+            await client.download(item, { signal: controller.signal, onProgress: progress, onChunk: (c) => writable.write(c) });
+            await writable.close();
+          } catch (error) {
+            await writable.abort().catch(() => {});
+            throw error;
+          }
+        } else {
+          if (item.size > 1.5 * 1024 ** 3 && !confirm(`This browser keeps downloads in memory until they finish. ${formatBytes(item.size)} may be too large. Continue?`)) {
+            throw new RelayError('Cancelled.');
+          }
+          const chunks = await client.download(item, { signal: controller.signal, onProgress: progress });
+          const url = URL.createObjectURL(new Blob(chunks as BlobPart[], { type: item.mime || 'application/octet-stream' }));
+          const anchor = el('a');
+          anchor.href = url;
+          anchor.download = item.name;
+          document.body.append(anchor);
+          anchor.click();
+          anchor.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        }
+        void client.ack(item, true);
         row.root.dataset.state = 'done';
         row.meta.textContent = `Downloaded · ${formatBytes(item.size)}`;
       } catch (error) {
+        const message = error instanceof Error && error.name === 'AbortError' ? 'Cancelled.' : error instanceof Error ? error.message : 'Failed';
+        void client.ack(item, false, message);
         row.root.dataset.state = 'failed';
         row.bar.style.width = '0%';
-        row.meta.textContent = error instanceof Error ? error.message : 'Failed';
+        row.meta.textContent = message;
       }
       controller = null;
       row.action.textContent = 'Download';
@@ -302,6 +357,7 @@ function start() {
       inboxEmpty.hidden = shown.size > 0;
     } catch (error) {
       if (error instanceof RelayError && error.status === 401) {
+        forget();
         return fatal('This session has ended. Open Relay on the phone and scan the new QR code.');
       }
       if (++misses >= 2) setStatus('wait', 'Phone not reachable — retrying');
