@@ -36,9 +36,20 @@ class TransferService : Service() {
     wifiLock = wifi?.createWifiLock(mode, "relay:transfer")?.apply { setReferenceCounted(false); acquire() }
     wakeLock = getSystemService(PowerManager::class.java)?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "relay:transfer")?.apply {
       setReferenceCounted(false)
-      // Upper bound so a bug can never drain the battery forever; renewed while the service runs.
+      // Upper bound so a bug can never drain the battery forever. Sessions are capped well below this.
       acquire(4 * 60 * 60 * 1000L)
     }
+  }
+
+  /**
+   * Android 15 limits dataSync services to six hours a day. When the limit is reached, end every
+   * session cleanly instead of letting the system crash the app.
+   */
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    // Clear holders first so the module's cleanup does not try to restart or stop us again.
+    synchronized(Companion) { holders.clear() }
+    onTimeoutListener?.invoke()
+    stopSelf()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -86,13 +97,15 @@ class TransferService : Service() {
     private const val CHANNEL = "relay_transfers"
     private const val NOTIFICATION_ID = 5101
     private const val ACTION_STOP = "expo.modules.relaytransfer.STOP"
-    private val holders = mutableSetOf<String>()
+    private val holders = mutableMapOf<String, Int>()
     @Volatile private var status = "Relay is active"
+    /** Set by the module: called when Android ends the service for running too long. */
+    @Volatile var onTimeoutListener: (() -> Unit)? = null
 
-    /** Reference-counted by reason ("session", "send"): the service runs while any holder remains. */
+    /** Counted per reason ("session", "send"): the service runs while any holder remains. */
     @Synchronized
     fun acquire(context: Context, reason: String, title: String) {
-      holders.add(reason)
+      holders[reason] = (holders[reason] ?: 0) + 1
       status = title
       try {
         ContextCompat.startForegroundService(context, Intent(context, TransferService::class.java))
@@ -103,7 +116,9 @@ class TransferService : Service() {
 
     @Synchronized
     fun release(context: Context, reason: String) {
-      if (!holders.remove(reason) || holders.isNotEmpty()) return
+      val count = holders[reason] ?: return
+      if (count > 1) holders[reason] = count - 1 else holders.remove(reason)
+      if (holders.isNotEmpty()) return
       try {
         context.startService(Intent(context, TransferService::class.java).setAction(ACTION_STOP))
       } catch (e: Exception) {

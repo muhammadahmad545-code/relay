@@ -6,6 +6,15 @@ Relay is an Android app. The phone runs a small encrypted server on your local n
 
 **[Download the latest APK](https://github.com/muhammadahmad545-code/relay/releases/latest)**
 
+## What's new in 1.1
+
+- **Redesigned** with tab navigation, an animated aurora hero, weekly transfer stats and a first-run introduction.
+- **Transfers survive the background.** A foreground service with Wi-Fi and wake locks keeps a transfer running when the screen locks or you switch apps.
+- **Replay protection.** Every encrypted request carries a nonce the phone refuses to accept twice, and cancel/complete requests are now encrypted too.
+- **Robustness.** Abandoned uploads are reaped after a minute; at most four uploads run at once; disk space is reserved per transfer; a full disk says so.
+- **Laptop downloads stream to disk** in Chromium browsers, and every download reports back to the phone when it finishes or stops.
+- **Full-screen QR code**, tap a received file to open it, optional auto-copy of received text, history search and filters.
+
 ## What it does
 
 - **Phone to phone.** One phone shows a QR code, the other scans it and sends files of any type and size, or the text on its clipboard.

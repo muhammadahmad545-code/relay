@@ -77,11 +77,15 @@ class RelayServer(
   private val pairings = ConcurrentHashMap<String, Pair<Long, RelayCrypto.LinkResponse>>()
   /** Nonces of every message accepted this session: a captured message can never be replayed. */
   private val seenNonces = java.util.Collections.synchronizedSet(HashSet<String>())
-  private val reaper: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+  private var reaper: ScheduledExecutorService? = null
   private var downloadCounter = 0
 
-  init {
-    reaper.scheduleWithFixedDelay({ runCatching { reap() } }, 15, 15, TimeUnit.SECONDS)
+  /** Starts listening and, only once that succeeded, the idle reaper (so failed ports leak nothing). */
+  fun open() {
+    start(30_000, true)
+    reaper = Executors.newSingleThreadScheduledExecutor().also {
+      it.scheduleWithFixedDelay({ runCatching { reap() } }, 15, 15, TimeUnit.SECONDS)
+    }
   }
 
   fun link(id: String, browserPublicKey: String) {
@@ -105,7 +109,7 @@ class RelayServer(
 
   fun shutdown() {
     stop()
-    reaper.shutdownNow()
+    reaper?.shutdownNow()
     incoming.values.forEach { transfer ->
       synchronized(transfer) {
         if (!transfer.finished) {

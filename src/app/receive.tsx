@@ -58,6 +58,11 @@ export default function Receive() {
   }, []);
 
   useEffect(() => {
+    const ended = RelayTransfer.addListener('onSessionEnded', (event) => setPhase({ status: 'error', message: event.reason }));
+    return () => ended.remove();
+  }, []);
+
+  useEffect(() => {
     void start();
     return () => {
       try {

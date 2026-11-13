@@ -48,7 +48,15 @@ class RelayTransferModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("RelayTransfer")
 
-    Events("onTransfer", "onText", "onPeer")
+    Events("onTransfer", "onText", "onPeer", "onSessionEnded")
+
+    OnCreate {
+      TransferService.onTimeoutListener = {
+        stopServer()
+        sendGeneration.incrementAndGet()
+        emit("onSessionEnded", mapOf("reason" to "Android limits background transfers to six hours a day. Open Receive again to continue."))
+      }
+    }
 
     Constant("chunkBytes") { RelayFiles.CHUNK_BYTES }
 
@@ -68,7 +76,7 @@ class RelayTransferModule : Module() {
         for (port in intArrayOf(8765, 8766, 8767, 0)) {
           try {
             val candidate = RelayServer(context, port, key, deviceName, ::emit)
-            candidate.start(30_000, true)
+            candidate.open()
             started = candidate
             break
           } catch (e: Exception) {
