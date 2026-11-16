@@ -1,6 +1,12 @@
 import { Appear, Card, EmptyState, Gradient, Hero, ListItem, Pressable, Ring, Screen, SectionTitle, TAB_BAR_SPACE, Text, UpdateCard, formatBytes, formatRelativeTime, useTheme, useUpdater } from '@basalt/core';
 import { useRouter } from 'expo-router';
-import { ArrowDownLeft, ArrowUpRight, CircleAlert, History, QrCode, ScanLine, ShieldCheck } from 'lucide-react-native';
+import ArrowDownLeft from 'lucide-react-native/icons/arrow-down-left';
+import ArrowUpRight from 'lucide-react-native/icons/arrow-up-right';
+import CircleAlert from 'lucide-react-native/icons/circle-exclamation-point';
+import History from 'lucide-react-native/icons/rotate-ccw-clock';
+import QrCode from 'lucide-react-native/icons/qr-code';
+import ScanLine from 'lucide-react-native/icons/scan-line';
+import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import React, { useMemo } from 'react';
 import { View } from 'react-native';
 import { UPDATE_SOURCE } from '../../lib/settings';

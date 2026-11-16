@@ -1,5 +1,7 @@
 import { SlotTabs } from '@basalt/core';
-import { History, Home, Settings } from 'lucide-react-native';
+import History from 'lucide-react-native/icons/rotate-ccw-clock';
+import Home from 'lucide-react-native/icons/house';
+import Settings from 'lucide-react-native/icons/settings';
 import React from 'react';
 
 const TABS = [

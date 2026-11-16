@@ -41,8 +41,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ['expo-splash-screen', { backgroundColor: '#0B0D10', image: './assets/splash-icon.png', imageWidth: 160 }],
     ['expo-camera', { cameraPermission: 'Relay uses the camera only to scan pairing codes.', recordAudioAndroid: false }],
     // Transfers run over plain HTTP on the local network; the payloads themselves are AES-256-GCM encrypted.
-    ['expo-build-properties', { android: { usesCleartextTraffic: true } }],
+    ['expo-build-properties', { android: { usesCleartextTraffic: true, useLegacyPackaging: true } }],
     './plugins/withReleaseSigning',
+    './plugins/withAbiSplits',
   ],
   experiments: { typedRoutes: true },
 });

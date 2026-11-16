@@ -1,6 +1,10 @@
 import { Card, ProgressBar, Text, formatBytes, formatSpeed, useTheme, useToast } from '@basalt/core';
 import { openReceived } from '../lib/open';
-import { ArrowDownLeft, ArrowUpRight, CircleAlert, CircleCheck, ExternalLink } from 'lucide-react-native';
+import ArrowDownLeft from 'lucide-react-native/icons/arrow-down-left';
+import ArrowUpRight from 'lucide-react-native/icons/arrow-up-right';
+import CircleAlert from 'lucide-react-native/icons/circle-exclamation-point';
+import CircleCheck from 'lucide-react-native/icons/circle-check';
+import ExternalLink from 'lucide-react-native/icons/external-link';
 import React from 'react';
 import { View } from 'react-native';
 import type { LiveTransfer } from '../lib/store';

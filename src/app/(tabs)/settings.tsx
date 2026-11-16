@@ -1,6 +1,9 @@
 import { Button, Card, Hero, ListItem, Screen, SectionTitle, SegmentedControl, TAB_BAR_SPACE, Text, TextField, Toggle, UpdateCard, themePreference, useTheme, useToast, useUpdater } from '@basalt/core';
 import * as Linking from 'expo-linking';
-import { Code, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react-native';
+import Code from 'lucide-react-native/icons/code';
+import RefreshCw from 'lucide-react-native/icons/refresh-cw';
+import ShieldCheck from 'lucide-react-native/icons/shield-check';
+import Sparkles from 'lucide-react-native/icons/sparkles';
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { REPO_URL, UPDATE_SOURCE, autoCopySetting, deviceName, onboardedSetting } from '../../lib/settings';

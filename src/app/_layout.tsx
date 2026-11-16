@@ -2,7 +2,10 @@ import { ErrorBoundary, Onboarding, ThemeProvider, ToastProvider, useBasaltFonts
 import { Stack } from 'expo-router/stack';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { Laptop, ShieldCheck, Wifi, Zap } from 'lucide-react-native';
+import Laptop from 'lucide-react-native/icons/laptop';
+import ShieldCheck from 'lucide-react-native/icons/shield-check';
+import Wifi from 'lucide-react-native/icons/wifi';
+import Zap from 'lucide-react-native/icons/zap';
 import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

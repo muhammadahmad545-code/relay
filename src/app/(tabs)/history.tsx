@@ -1,6 +1,10 @@
 import { Appear, Button, Card, Chip, EmptyState, Hero, ListItem, Screen, StatTile, TAB_BAR_SPACE, Text, TextField, formatBytes, formatRelativeTime, toMessage, useTheme, useToast } from '@basalt/core';
 import { useFocusEffect } from 'expo-router';
-import { ArrowDownLeft, ArrowUpRight, CircleAlert, History as HistoryIcon, Trash2 } from 'lucide-react-native';
+import ArrowDownLeft from 'lucide-react-native/icons/arrow-down-left';
+import ArrowUpRight from 'lucide-react-native/icons/arrow-up-right';
+import CircleAlert from 'lucide-react-native/icons/circle-exclamation-point';
+import HistoryIcon from 'lucide-react-native/icons/rotate-ccw-clock';
+import Trash2 from 'lucide-react-native/icons/trash';
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, View } from 'react-native';
 import type { HistoryEntry } from '../../lib/history';

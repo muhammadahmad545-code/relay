@@ -1,7 +1,7 @@
 import { Button, Text, useTheme } from '@basalt/core';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
-import { Camera } from 'lucide-react-native';
+import Camera from 'lucide-react-native/icons/camera';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, View } from 'react-native';
 

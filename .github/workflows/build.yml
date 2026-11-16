@@ -90,13 +90,18 @@ jobs:
           NODE_ENV: production
         run: ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64
 
-      - name: Collect APK
+      - name: Collect APKs
         run: |
           mkdir -p dist
-          APK="dist/relay-${{ steps.version.outputs.version }}.apk"
-          cp android/app/build/outputs/apk/release/app-release.apk "$APK"
-          (cd dist && sha256sum "$(basename "$APK")" > "$(basename "$APK").sha256")
-          ls -la dist && cat dist/*.sha256
+          VERSION=${{ steps.version.outputs.version }}
+          for ABI in arm64-v8a armeabi-v7a x86_64; do
+            SRC="android/app/build/outputs/apk/release/app-$ABI-release.apk"
+            [ -f "$SRC" ] || { echo "::error::Missing $SRC"; ls android/app/build/outputs/apk/release; exit 1; }
+            OUT="dist/relay-$VERSION-$ABI.apk"
+            cp "$SRC" "$OUT"
+            (cd dist && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
+          done
+          ls -la dist
 
       - uses: actions/upload-artifact@v4
         with:
@@ -136,7 +141,7 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: TABS="History Settings" bash scripts/smoke.sh "$(ls dist/*.apk | head -1)" dev.basalt.relay Home
+          script: TABS="History Settings" bash scripts/smoke.sh "$(ls dist/*-x86_64.apk | head -1)" dev.basalt.relay Home
       - uses: actions/upload-artifact@v4
         if: always()
         with:
