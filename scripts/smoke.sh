@@ -19,13 +19,16 @@ tap_text() {
 import re, sys
 want = sys.argv[1]
 xml = open('/tmp/ui.xml', encoding='utf-8', errors='ignore').read()
+# The last match wins: the floating tab bar is drawn last, on top of any same-named chip below it.
+hit = None
 for m in re.finditer(r'<node [^>]*>', xml):
     n = m.group(0)
     t = re.search(r' text="([^"]*)"', n); d = re.search(r' content-desc="([^"]*)"', n)
     if (t and t.group(1) == want) or (d and d.group(1) == want):
         b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
         if b:
-            x1, y1, x2, y2 = map(int, b.groups()); print((x1 + x2) // 2, (y1 + y2) // 2); break
+            x1, y1, x2, y2 = map(int, b.groups()); hit = ((x1 + x2) // 2, (y1 + y2) // 2)
+if hit: print(*hit)
 PY
 )
   [ -n "$xy" ] && adb shell input tap $xy && echo "tapped '$1' at $xy"
