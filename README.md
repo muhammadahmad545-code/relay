@@ -8,6 +8,12 @@ Relay is an Android app. The phone runs a small encrypted server on your local n
 
 Pick the file ending in **`-arm64-v8a.apk`**: that is the right one for almost every phone from the last several years. `-armeabi-v7a.apk` is for older 32-bit phones and `-x86_64.apk` for emulators and Chromebooks. Installed apps update themselves to the matching file.
 
+## What's new in 1.2
+
+- **Calmer, cleaner design:** plain surfaces, a docked tab bar, clear type and no distracting motion.
+- **Share to Relay:** share files or text from any app (Gallery, Files, WhatsApp, Chrome) and Relay opens Send with them already added.
+- **Tested end to end on every build:** an Android emulator runs the app like a user before any release.
+
 ## What's new in 1.1
 
 - **Redesigned** with tab navigation, an animated aurora hero, weekly transfer stats and a first-run introduction.
