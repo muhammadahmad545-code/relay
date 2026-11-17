@@ -1,9 +1,10 @@
 import { Appear, Button, Card, EmptyState, Header, ListItem, Pressable, Ring, Screen, Text, formatBytes, toMessage, useTheme, useToast } from '@basalt/core';
 import { deletePickedCopies } from '../lib/cleanup';
+import { consumeShare } from '../lib/share';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { useKeepAwake } from 'expo-keep-awake';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import CircleCheck from 'lucide-react-native/icons/circle-check';
 import ClipboardPaste from 'lucide-react-native/icons/clipboard-paste';
 import FileText from 'lucide-react-native/icons/file-text';
@@ -49,6 +50,17 @@ export default function Send() {
   const mounted = useRef(true);
   const filesRef = useRef<Picked[]>([]);
   filesRef.current = files;
+  const { shared } = useLocalSearchParams<{ shared?: string }>();
+
+  // Items shared to Relay from another app arrive here already selected.
+  useEffect(() => {
+    const items = consumeShare();
+    if (!items) return;
+    if (items.files.length) setFiles((current) => [...current, ...items.files]);
+    if (items.text) setText(items.text);
+    if (items.failed.length) toast(`Could not read ${items.failed.length} shared item${items.failed.length === 1 ? '' : 's'}.`, 'danger');
+    setStep({ name: 'pick' });
+  }, [shared, toast]);
 
   useEffect(() => {
     useRelay.getState().resetSession();

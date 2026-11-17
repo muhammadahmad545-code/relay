@@ -44,6 +44,20 @@ wait_for() {
   return 1
 }
 
+FAILED=0
+fail() { echo "E2E FAIL: $*"; FAILED=1; }
+pass() { echo "E2E PASS: $*"; }
+dump() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb pull /sdcard/ui.xml /tmp/ui.xml >/dev/null 2>&1; }
+# True when some on-screen text contains the given substring.
+has_text() { dump; grep -q "text=\"[^\"]*$1" /tmp/ui.xml 2>/dev/null; }
+wait_contains() {
+  for i in $(seq 1 ${2:-20}); do has_text "$1" && return 0; sleep 3; done
+  return 1
+}
+type_text() { adb shell input text "$(echo "$1" | sed 's/ /%s/g')"; }
+expect() { if wait_contains "$1" "${2:-20}"; then pass "$3"; else fail "$3 (did not see '$1')"; shot "fail-$(echo "$3" | tr -c 'a-zA-Z0-9' '-' | cut -c1-40)"; fi; }
+expect_not() { sleep "${2:-3}"; if has_text "$1"; then fail "$3 (still saw '$1')"; else pass "$3"; fi; }
+
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null
 wait_for "Skip" || echo "introduction never appeared"
 shot 1-launch
@@ -74,6 +88,16 @@ PY
 echo "---- JS errors ----"
 head -80 "$OUT/errors.txt"
 
+# App-specific end-to-end checks.
+if [ -f scripts/e2e.sh ]; then
+  echo "---- end-to-end ----"
+  adb logcat -c
+  source scripts/e2e.sh
+  adb logcat -d -v time > "$OUT/logcat-e2e.txt"
+  grep -E "AndroidRuntime|FATAL" "$OUT/logcat-e2e.txt" | head -40 && grep -q "FATAL EXCEPTION" "$OUT/logcat-e2e.txt" && fail "the app crashed during end-to-end tests"
+fi
+
 # Fail the build when the app did not render its first screen.
 grep -q "text=\"$EXPECT\"" "$OUT/2-after-intro.xml" && grep -q "text=\"$EXPECT\"" "$OUT/3-relaunch.xml" || { echo "SMOKE TEST FAILED: '$EXPECT' not on screen"; exit 1; }
+[ "$FAILED" = 0 ] || { echo "END-TO-END TESTS FAILED"; exit 1; }
 echo "SMOKE TEST PASSED"

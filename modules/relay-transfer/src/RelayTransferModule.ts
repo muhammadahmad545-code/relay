@@ -17,6 +17,8 @@ declare class RelayTransferModule extends NativeModule<RelayTransferModuleEvents
   sendFiles(baseUrl: string, key: string, files: OutgoingFile[]): Promise<{ sent: number; failed: number }>;
   sendText(baseUrl: string, key: string, text: string): Promise<void>;
   cancelSend(): void;
+  /** Text and files shared to Relay from another app, once per share; null when there is none. */
+  takeSharedItems(): { text: string | null; files: { uri: string; name: string; mime: string; size: number }[]; failed: string[] } | null;
 }
 
 export default requireNativeModule<RelayTransferModule>('RelayTransfer');

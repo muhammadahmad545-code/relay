@@ -1,4 +1,5 @@
 import { ErrorBoundary, Onboarding, ThemeProvider, ToastProvider, useBasaltFonts, useTheme } from '@basalt/core';
+import { router } from 'expo-router';
 import { Stack } from 'expo-router/stack';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -10,6 +11,8 @@ import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ACCENT, onboardedSetting } from '../lib/settings';
+import RelayTransfer from '../../modules/relay-transfer';
+import { collectShare } from '../lib/share';
 import { subscribeToRelayEvents, useRelay } from '../lib/store';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -24,6 +27,22 @@ const PAGES = [
 function Navigator() {
   const { colors, scheme } = useTheme();
   const [onboarded, setOnboarded] = onboardedSetting.use();
+
+  // Shared from another app (Android share sheet): open Send with the items already added.
+  useEffect(() => {
+    if (!onboarded) return;
+    const open = () => {
+      if (collectShare()) setTimeout(() => router.push({ pathname: '/send', params: { shared: String(Date.now()) } }), 0);
+    };
+    open();
+    let sub: { remove: () => void } | null = null;
+    try {
+      sub = RelayTransfer.addListener('onShare', open);
+    } catch {
+      sub = null;
+    }
+    return () => sub?.remove();
+  }, [onboarded]);
   if (!onboarded) return <Onboarding appName="Relay" pages={PAGES} onDone={() => setOnboarded(true)} />;
   return (
     <>

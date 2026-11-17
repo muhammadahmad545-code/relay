@@ -48,7 +48,21 @@ class RelayTransferModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("RelayTransfer")
 
-    Events("onTransfer", "onText", "onPeer", "onSessionEnded")
+    Events("onTransfer", "onText", "onPeer", "onSessionEnded", "onShare")
+
+    /** Something shared to Relay from another app, if the current launch came from the share sheet. */
+    Function("takeSharedItems") {
+      val intent = appContext.currentActivity?.intent
+      if (ShareIntake.isShare(intent)) ShareIntake.take(context, intent!!) else null
+    }
+
+    /** Relay was already open and the user shared something else to it. */
+    OnNewIntent { intent ->
+      if (ShareIntake.isShare(intent)) {
+        appContext.currentActivity?.intent = intent
+        emit("onShare", mapOf("pending" to true))
+      }
+    }
 
     OnCreate {
       TransferService.onTimeoutListener = {

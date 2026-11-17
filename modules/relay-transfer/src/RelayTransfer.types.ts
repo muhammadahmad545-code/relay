@@ -38,4 +38,5 @@ export type RelayTransferModuleEvents = {
   onText: (event: TextEvent) => void;
   onPeer: (event: PeerEvent) => void;
   onSessionEnded: (event: { reason: string }) => void;
+  onShare: (event: { pending: boolean }) => void;
 };
