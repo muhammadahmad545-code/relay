@@ -35,8 +35,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     predictiveBackGestureEnabled: false,
     // Appear in Android's share sheet so files and text can be sent from any app.
     intentFilters: [
-      { action: 'android.intent.action.SEND', category: ['android.intent.category.DEFAULT'], data: [{ mimeType: '*/*' }] },
-      { action: 'android.intent.action.SEND_MULTIPLE', category: ['android.intent.category.DEFAULT'], data: [{ mimeType: '*/*' }] },
+      // Expo prefixes these with android.intent.action. / android.intent.category. itself.
+      { action: 'SEND', category: ['DEFAULT'], data: [{ mimeType: '*/*' }] },
+      { action: 'SEND_MULTIPLE', category: ['DEFAULT'], data: [{ mimeType: '*/*' }] },
     ],
   },
   plugins: [

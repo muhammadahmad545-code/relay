@@ -61,20 +61,22 @@ scroll_to() {
 }
 # Scroll back to the top of the current screen.
 scroll_top() { for i in 1 2 3 4; do adb shell input swipe 160 200 160 600 200; done; sleep 1; }
-# Tap the first view whose resource id ends with the given name.
+# Tap the first view whose resource id ends with the given name (optionally at a fraction of its
+# width and height, e.g. 0.25 0.75 for the lower-left area).
 tap_res() {
   dump
   local xy
-  xy=$(python3 - "$1" <<'PY'
+  xy=$(python3 - "$1" "${2:-0.5}" "${3:-0.5}" <<'PY'
 import re, sys
+want, fx, fy = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
 xml = open('/tmp/ui.xml', encoding='utf-8', errors='ignore').read()
 for m in re.finditer(r'<node [^>]*>', xml):
     n = m.group(0)
     r = re.search(r'resource-id="([^"]*)"', n)
-    if r and r.group(1).endswith(sys.argv[1]):
+    if r and r.group(1).endswith(want):
         b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
         if b:
-            x1, y1, x2, y2 = map(int, b.groups()); print((x1 + x2) // 2, (y1 + y2) // 2); break
+            x1, y1, x2, y2 = map(int, b.groups()); print(int(x1 + (x2 - x1) * fx), int(y1 + (y2 - y1) * fy)); break
 PY
 )
   [ -n "$xy" ] && adb shell input tap $xy && echo "tapped #$1 at $xy"
