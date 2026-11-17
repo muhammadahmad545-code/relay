@@ -54,8 +54,33 @@ wait_contains() {
   for i in $(seq 1 ${2:-20}); do has_text "$1" && return 0; sleep 3; done
   return 1
 }
+# Scroll down until the text is on screen (lists longer than the screen).
+scroll_to() {
+  for i in $(seq 1 8); do has_text "$1" && return 0; adb shell input swipe 160 520 160 220 300; sleep 1; done
+  has_text "$1"
+}
+# Scroll back to the top of the current screen.
+scroll_top() { for i in 1 2 3 4; do adb shell input swipe 160 200 160 600 200; done; sleep 1; }
+# Tap the first view whose resource id ends with the given name.
+tap_res() {
+  dump
+  local xy
+  xy=$(python3 - "$1" <<'PY'
+import re, sys
+xml = open('/tmp/ui.xml', encoding='utf-8', errors='ignore').read()
+for m in re.finditer(r'<node [^>]*>', xml):
+    n = m.group(0)
+    r = re.search(r'resource-id="([^"]*)"', n)
+    if r and r.group(1).endswith(sys.argv[1]):
+        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+        if b:
+            x1, y1, x2, y2 = map(int, b.groups()); print((x1 + x2) // 2, (y1 + y2) // 2); break
+PY
+)
+  [ -n "$xy" ] && adb shell input tap $xy && echo "tapped #$1 at $xy"
+}
 type_text() { adb shell input text "$(echo "$1" | sed 's/ /%s/g')"; }
-expect() { if wait_contains "$1" "${2:-20}"; then pass "$3"; else fail "$3 (did not see '$1')"; shot "fail-$(echo "$3" | tr -c 'a-zA-Z0-9' '-' | cut -c1-40)"; fi; }
+expect() { if wait_contains "$1" "${2:-20}" || scroll_to "$1"; then pass "$3"; else fail "$3 (did not see '$1')"; shot "fail-$(echo "$3" | tr -c 'a-zA-Z0-9' '-' | cut -c1-40)"; fi; }
 expect_not() { sleep "${2:-3}"; if has_text "$1"; then fail "$3 (still saw '$1')"; else pass "$3"; fi; }
 
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null

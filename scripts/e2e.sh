@@ -25,8 +25,8 @@ esac
 head -c 1572864 /dev/urandom > /tmp/e2e-transfer.bin
 if npx tsx e2e/client.ts "$URL" 18765 /tmp/e2e-transfer.bin; then pass "encrypted upload and text from a laptop client"; else fail "encrypted upload and text from a laptop client"; fi
 sleep 4
-expect "hello from the laptop" 15 "received text appears on the phone"
-expect "e2e-transfer.bin" 10 "received file appears on the phone"
+expect "hello from the laptop" 8 "received text appears on the phone"
+expect "e2e-transfer.bin" 8 "received file appears on the phone"
 shot e2e-received
 remote=$(adb shell "ls -l /sdcard/Download/Relay/ 2>/dev/null | grep e2e-transfer.bin" | awk '{print $5}')
 [ "$remote" = 1572864 ] && pass "file saved to Downloads/Relay with the right size" || fail "file saved to Downloads/Relay with the right size (got '$remote')"
@@ -38,7 +38,7 @@ code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:1876
 [ "$code" != 401 ] && pass "server stops when leaving Receive" || fail "server stops when leaving Receive (still answering)"
 
 # Share text into Relay from another app.
-adb shell am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT "shared from another app" dev.basalt.relay >/dev/null
+adb shell "am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT 'shared from another app' dev.basalt.relay"
 sleep 6
 expect "shared from another app" 15 "text shared from another app opens in Send"
 shot e2e-share
