@@ -63,8 +63,10 @@ tap_text "History"; sleep 4
 tap_text "More for e2e-transfer.bin" || fail "file actions button visible on a received file"
 sleep 2
 shot e2e-file-actions
-tap_text "Delete file"; sleep 2
-tap_text "Delete"; sleep 3
+# Android dialogs show their buttons in capitals.
+tap_text "DELETE FILE" || tap_text "Delete file"; sleep 2
+shot e2e-delete-confirm
+tap_text "DELETE" || tap_text "Delete"; sleep 3
 expect "file deleted" 10 "deleting a received file updates its history row"
 left=$(adb shell "ls /sdcard/Download/Relay/ 2>/dev/null | grep -c e2e-transfer.bin" | tr -d '\r')
 [ "$left" = 0 ] && pass "received file removed from Downloads/Relay" || fail "received file removed from Downloads/Relay (still there)"
