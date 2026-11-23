@@ -4,6 +4,8 @@ import Constants from 'expo-constants';
 export const deviceName = createSetting<string>('relay.deviceName', (Constants.deviceName ?? 'My phone').slice(0, 40));
 
 export const autoCopySetting = createSetting<boolean>('relay.autoCopyText', false);
+/** Ask for fingerprint, face or the phone's screen lock when Relay opens. */
+export const lockSetting = createSetting<boolean>('relay.lock', false);
 export const onboardedSetting = createSetting<boolean>('relay.onboarded', false);
 
 export const UPDATE_SOURCE = { owner: 'muhammadahmad545-code', repo: 'relay' } as const;

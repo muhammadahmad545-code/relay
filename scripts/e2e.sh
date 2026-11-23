@@ -43,3 +43,34 @@ sleep 6
 expect "shared from another app" 15 "text shared from another app opens in Send"
 shot e2e-share
 adb shell input keyevent KEYCODE_BACK; sleep 2
+
+# Launcher shortcuts (long-press the icon): Receive and Send.
+adb shell dumpsys shortcut > "$OUT/shortcuts.txt" 2>/dev/null
+grep -A40 "Package: dev.basalt.relay" "$OUT/shortcuts.txt" | grep -q "id=receive" && pass "launcher shortcuts installed" || fail "launcher shortcuts installed"
+
+# Quick Settings tile opens Receive.
+TILE=dev.basalt.relay/expo.modules.relaytransfer.ReceiveTileService
+adb shell cmd statusbar add-tile $TILE >/dev/null 2>&1
+adb shell cmd statusbar click-tile $TILE >/dev/null 2>&1
+sleep 6
+expect ":8765" 20 "Quick Settings tile opens Receive and starts a session"
+shot e2e-tile
+adb shell cmd statusbar collapse >/dev/null 2>&1
+adb shell input keyevent KEYCODE_BACK; sleep 3
+
+# Received files can be deleted from History.
+tap_text "History"; sleep 4
+tap_text "More for e2e-transfer.bin" || fail "file actions button visible on a received file"
+sleep 2
+shot e2e-file-actions
+tap_text "Delete file"; sleep 2
+tap_text "Delete"; sleep 3
+expect "file deleted" 10 "deleting a received file updates its history row"
+left=$(adb shell "ls /sdcard/Download/Relay/ 2>/dev/null | grep -c e2e-transfer.bin" | tr -d '\r')
+[ "$left" = 0 ] && pass "received file removed from Downloads/Relay" || fail "received file removed from Downloads/Relay (still there)"
+
+# Privacy settings.
+tap_text "Settings"; sleep 4
+expect "App lock" 10 "app lock setting is available"
+expect "Quick Settings tile" 10 "quick access help is shown"
+shot e2e-settings

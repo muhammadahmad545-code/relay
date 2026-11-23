@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.png" width="112" alt="Relay logo: a paper plane leaving a dotted trail from a sending device"></p>
+
 # Relay
 
 Send files and text between nearby devices with no internet, no account and no cloud. Phone to phone, or phone to any laptop browser.
@@ -7,6 +9,14 @@ Relay is an Android app. The phone runs a small encrypted server on your local n
 **[Download the latest APK](https://github.com/muhammadahmad545-code/relay/releases/latest)**
 
 Pick the file ending in **`-arm64-v8a.apk`**: that is the right one for almost every phone from the last several years. `-armeabi-v7a.apk` is for older 32-bit phones and `-x86_64.apk` for emulators and Chromebooks. Installed apps update themselves to the matching file.
+
+## What's new in 1.3
+
+- **A real logo.** A paper plane leaving its sending device, on the launcher, the splash screen and the notification.
+- **Quick Settings tile.** Add *Relay receive* to the notification shade: one tap opens Receive and starts a session. The tile lights up while a session is running.
+- **Shortcuts on the app icon.** Long-press Relay for *Receive* and *Send*.
+- **App lock.** Optional fingerprint, face or screen-lock prompt when Relay opens. While it is on, Relay is hidden from screenshots and the recent-apps preview.
+- **Manage received files.** Share or delete a received file straight from History; History shows how much space received files use, and marks files you deleted.
 
 ## What's new in 1.2
 
@@ -71,8 +81,17 @@ plugins/                     Config plugin that wires release signing into the G
 | Camera | Scanning pairing codes. Nothing is recorded. |
 | Network | The local transfer itself, and the update check against GitHub. |
 | Install packages | Handing a downloaded update to the Android installer. |
+| Notifications and foreground service | The *Relay is receiving/sending* notification that keeps a transfer alive while the screen is off. |
+| Biometrics (only if you turn on App lock) | Asking for your fingerprint, face or screen lock. Relay never sees the fingerprint itself. |
 
 No storage, contacts, location or microphone access. No analytics.
+
+## Honest limits
+
+- Both devices must be on the same network (Wi-Fi, or one device's hotspot). Some public and office Wi-Fi networks block devices from reaching each other; use a hotspot there.
+- Android allows a background *data sync* service about six hours a day. Very long sessions end with a message; open Receive again to continue.
+- Anyone who can see your QR code during a session can connect. Close Receive when you are done; every new session gets a new key.
+- Deleting a received file removes it from `Downloads/Relay` on this phone only; copies the sender kept are untouched.
 
 ## Development
 

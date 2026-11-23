@@ -3,6 +3,7 @@ import { deletePickedCopies } from '../lib/cleanup';
 import { consumeShare } from '../lib/share';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
+import { useLock } from '@basalt/core/src/lock/LockGate';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import CircleCheck from 'lucide-react-native/icons/circle-check';
@@ -41,6 +42,7 @@ export default function Send() {
   useKeepAwake();
   const { colors, spacing } = useTheme();
   const toast = useToast();
+  const lock = useLock();
   const router = useRouter();
   const [files, setFiles] = useState<Picked[]>([]);
   const [text, setText] = useState<string | null>(null);
@@ -85,7 +87,7 @@ export default function Send() {
   const pick = async () => {
     setPicking(true);
     try {
-      const result = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+      const result = await lock.runExternal(() => DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true }));
       if (result.canceled) return;
       const picked = result.assets.map((a) => ({ uri: a.uri, name: a.name, mime: a.mimeType ?? '', size: a.size ?? 0 }));
       setFiles((current) => [...current, ...picked]);

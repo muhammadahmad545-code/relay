@@ -1,7 +1,13 @@
 package expo.modules.relaytransfer
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.net.Uri
+import android.os.Build
+import android.view.WindowManager
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -41,6 +47,7 @@ class RelayTransferModule : Module() {
     serverGeneration.incrementAndGet()
     server?.shutdown()
     server = null
+    runCatching { ReceiveTileService.refresh(context, false) }
     runCatching { RelayFiles.clearTemp(context) }
     runCatching { TransferService.release(context, "session") }
   }
@@ -107,6 +114,7 @@ class RelayTransferModule : Module() {
           server = running
         }
         TransferService.acquire(context, "session", "Relay is receiving")
+        runCatching { ReceiveTileService.refresh(context, true) }
         promise.resolve(mapOf(
           "port" to running.listeningPort,
           "addresses" to RelayFiles.localAddresses(),
@@ -239,6 +247,66 @@ class RelayTransferModule : Module() {
           promise.reject("ERR_RELAY_UNREACHABLE", "Could not reach the other device.", e)
         }
       }
+    }
+
+    /** Hide the app from screenshots and the recent-apps preview (used by the app lock). */
+    Function("setSecure") { on: Boolean ->
+      val activity = appContext.currentActivity ?: return@Function null
+      activity.runOnUiThread {
+        if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      }
+      null
+    }
+
+    /** Hand a received file to Android's share sheet. */
+    Function("shareReceived") { uri: String, mime: String ->
+      val send = Intent(Intent.ACTION_SEND)
+        .setType(mime.ifEmpty { "application/octet-stream" })
+        .putExtra(Intent.EXTRA_STREAM, Uri.parse(uri))
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      val chooser = Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      (appContext.currentActivity ?: context).startActivity(chooser)
+    }
+
+    /** Delete a file Relay saved. True when it is gone (also when it was already deleted elsewhere). */
+    Function("deleteReceived") { uri: String ->
+      val parsed = Uri.parse(uri)
+      when (parsed.scheme) {
+        "content" -> runCatching { context.contentResolver.delete(parsed, null, null) >= 0 }.getOrDefault(false)
+        "file" -> parsed.path?.let { File(it).let { f -> !f.exists() || f.delete() } } ?: false
+        else -> false
+      }
+    }
+
+    /** True when a received file still exists. */
+    Function("receivedExists") { uri: String ->
+      val parsed = Uri.parse(uri)
+      when (parsed.scheme) {
+        "content" -> runCatching { context.contentResolver.openFileDescriptor(parsed, "r")?.use { true } ?: false }.getOrDefault(false)
+        "file" -> parsed.path?.let { File(it).exists() } ?: false
+        else -> false
+      }
+    }
+
+    /** Long-press shortcuts on the launcher icon: Receive and Send. */
+    Function("installShortcuts") {
+      if (Build.VERSION.SDK_INT < 25) return@Function false
+      val manager = context.getSystemService(ShortcutManager::class.java) ?: return@Function false
+      fun shortcut(id: String, label: String, longLabel: String, icon: Int) =
+        ShortcutInfo.Builder(context, id)
+          .setShortLabel(label)
+          .setLongLabel(longLabel)
+          .setIcon(Icon.createWithResource(context, icon))
+          .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse("relay://$id")).setPackage(context.packageName))
+          .build()
+      runCatching {
+        manager.dynamicShortcuts = listOf(
+          shortcut("receive", "Receive", "Receive files", R.drawable.ic_relay_shortcut_receive),
+          shortcut("send", "Send", "Send files", R.drawable.ic_relay_shortcut_send),
+        )
+        true
+      }.getOrDefault(false)
     }
 
     /** Cancels whatever send is in progress: connecting, sending text, or any file in the queue. */

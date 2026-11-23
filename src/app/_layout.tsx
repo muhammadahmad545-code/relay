@@ -1,3 +1,4 @@
+import { LockGate, useLock } from '@basalt/core/src/lock/LockGate';
 import { ErrorBoundary, Onboarding, ThemeProvider, ToastProvider, useBasaltFonts, useTheme } from '@basalt/core';
 import { router } from 'expo-router';
 import { Stack } from 'expo-router/stack';
@@ -10,7 +11,7 @@ import Zap from 'lucide-react-native/icons/zap';
 import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ACCENT, onboardedSetting } from '../lib/settings';
+import { ACCENT, lockSetting, onboardedSetting } from '../lib/settings';
 import RelayTransfer from '../../modules/relay-transfer';
 import { collectShare } from '../lib/share';
 import { subscribeToRelayEvents, useRelay } from '../lib/store';
@@ -27,12 +28,23 @@ const PAGES = [
 function Navigator() {
   const { colors, scheme } = useTheme();
   const [onboarded, setOnboarded] = onboardedSetting.use();
+  const [locked] = lockSetting.use();
+  const lock = useLock();
+
+  // With the lock on, keep Relay out of screenshots and the recent-apps preview.
+  useEffect(() => {
+    try {
+      RelayTransfer.setSecure(locked);
+    } catch {
+      // Older native build.
+    }
+  }, [locked]);
 
   // Shared from another app (Android share sheet): open Send with the items already added.
   useEffect(() => {
     if (!onboarded) return;
     const open = () => {
-      if (collectShare()) setTimeout(() => router.push({ pathname: '/send', params: { shared: String(Date.now()) } }), 0);
+      if (collectShare()) lock.whenUnlocked(() => setTimeout(() => router.push({ pathname: '/send', params: { shared: String(Date.now()) } }), 0));
     };
     open();
     let sub: { remove: () => void } | null = null;
@@ -57,6 +69,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     subscribeToRelayEvents();
+    try {
+      RelayTransfer.installShortcuts();
+    } catch {
+      // Launcher shortcuts are a nice-to-have.
+    }
     void useRelay.getState().loadHistory();
   }, []);
 
@@ -72,7 +89,9 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <ThemeProvider accent={ACCENT}>
             <ToastProvider>
-              <Navigator />
+              <LockGate setting={lockSetting} appName="Relay" message="Unlock to see your transfers and received files.">
+                <Navigator />
+              </LockGate>
             </ToastProvider>
           </ThemeProvider>
         </SafeAreaProvider>

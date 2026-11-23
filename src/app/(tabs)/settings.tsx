@@ -1,12 +1,16 @@
 import { Button, Card, Hero, ListItem, Screen, SectionTitle, SegmentedControl, TAB_BAR_SPACE, Text, TextField, Toggle, UpdateCard, themePreference, useTheme, useToast, useUpdater } from '@basalt/core';
+import { canUseLock } from '@basalt/core/src/lock/LockGate';
 import * as Linking from 'expo-linking';
+import Fingerprint from 'lucide-react-native/icons/fingerprint-pattern';
+import LayoutGrid from 'lucide-react-native/icons/layout-grid';
+import PanelTop from 'lucide-react-native/icons/panel-top';
 import Code from 'lucide-react-native/icons/code';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import Sparkles from 'lucide-react-native/icons/sparkles';
 import React, { useState } from 'react';
 import { View } from 'react-native';
-import { REPO_URL, UPDATE_SOURCE, autoCopySetting, deviceName, onboardedSetting } from '../../lib/settings';
+import { REPO_URL, UPDATE_SOURCE, autoCopySetting, deviceName, lockSetting, onboardedSetting } from '../../lib/settings';
 
 const THEMES = [
   { value: 'system', label: 'System' },
@@ -15,11 +19,12 @@ const THEMES = [
 ] as const;
 
 export default function Settings() {
-  const { spacing } = useTheme();
+  const { colors, spacing } = useTheme();
   const toast = useToast();
   const [theme, setTheme] = themePreference.use();
   const [name, setName] = deviceName.use();
   const [autoCopy, setAutoCopy] = autoCopySetting.use();
+  const [lock, setLock] = lockSetting.use();
   const [draft, setDraft] = useState(name);
   const updater = useUpdater({ source: UPDATE_SOURCE, auto: false });
 
@@ -52,6 +57,38 @@ export default function Settings() {
           </View>
           <Toggle value={autoCopy} onChange={setAutoCopy} accessibilityLabel="Copy received text automatically" />
         </View>
+      </Card>
+
+      <SectionTitle title="Privacy" />
+      <Card style={{ gap: spacing.md }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
+          <Fingerprint size={22} color={colors.accent} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text variant="bodyStrong">App lock</Text>
+            <Text variant="caption" color="textMuted">
+              Ask for your fingerprint, face or screen lock when Relay opens. Also hides Relay from screenshots and the recent-apps view.
+            </Text>
+          </View>
+          <Toggle
+            value={lock}
+            accessibilityLabel="App lock"
+            onChange={async (on) => {
+              if (on && !(await canUseLock())) return toast('Set up a screen lock on this phone first.', 'danger');
+              setLock(on);
+              toast(on ? 'App lock is on' : 'App lock is off', 'success');
+            }}
+          />
+        </View>
+      </Card>
+
+      <SectionTitle title="Quick access" />
+      <Card style={{ paddingVertical: spacing.xs }}>
+        <ListItem
+          title="Quick Settings tile"
+          subtitle="Pull down the notification shade twice, tap the pencil, and drag “Relay receive” into your tiles. One tap starts receiving."
+          icon={PanelTop}
+        />
+        <ListItem title="Shortcuts on the app icon" subtitle="Long-press Relay’s icon for Receive and Send." icon={LayoutGrid} />
       </Card>
 
       <SectionTitle title="Appearance" />

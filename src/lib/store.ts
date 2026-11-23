@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import RelayTransfer from '../../modules/relay-transfer';
 import type { TransferEvent } from '../../modules/relay-transfer';
 import * as Clipboard from 'expo-clipboard';
-import { addHistory, clearHistory, listHistory } from './history';
+import { addHistory, clearHistory, forgetFile, listHistory } from './history';
 import { autoCopySetting } from './settings';
 import type { HistoryEntry } from './history';
 
@@ -25,6 +25,7 @@ interface RelayState {
   historyError: string | null;
   loadHistory: () => Promise<void>;
   wipeHistory: () => Promise<void>;
+  forgetFile: (id: string) => Promise<void>;
   resetSession: () => void;
 }
 
@@ -40,6 +41,10 @@ export const useRelay = create<RelayState>((set) => ({
     } catch {
       set({ historyError: 'History could not be loaded.' });
     }
+  },
+  forgetFile: async (id) => {
+    await forgetFile(id);
+    set((state) => ({ history: state.history.map((h) => (h.id === id ? { ...h, savedUri: null } : h)) }));
   },
   wipeHistory: async () => {
     await clearHistory();

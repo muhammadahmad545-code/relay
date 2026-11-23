@@ -20,7 +20,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     package: 'dev.basalt.relay',
     versionCode: versionCode(pkg.version),
     adaptiveIcon: {
-      backgroundColor: '#0B0D10',
+      backgroundColor: '#0C0D10',
+      backgroundImage: './assets/android-icon-background.png',
       foregroundImage: './assets/android-icon-foreground.png',
       monochromeImage: './assets/android-icon-monochrome.png',
     },
@@ -43,8 +44,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     'expo-router',
     'expo-sqlite',
+    ['expo-local-authentication', { faceIDPermission: false }],
     'expo-font',
-    ['expo-splash-screen', { backgroundColor: '#0B0D10', image: './assets/splash-icon.png', imageWidth: 160 }],
+    ['expo-splash-screen', { backgroundColor: '#0C0D10', image: './assets/splash-icon.png', imageWidth: 220 }],
     ['expo-camera', { cameraPermission: 'Relay uses the camera only to scan pairing codes.', recordAudioAndroid: false }],
     // Transfers run over plain HTTP on the local network; the payloads themselves are AES-256-GCM encrypted.
     ['expo-build-properties', { android: { usesCleartextTraffic: true, useLegacyPackaging: true } }],

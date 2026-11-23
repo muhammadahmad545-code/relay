@@ -75,6 +75,12 @@ export async function listHistory(limit = 200): Promise<HistoryEntry[]> {
   return rows.map(toEntry);
 }
 
+/** The file was deleted from the phone: keep the row, forget the file. */
+export async function forgetFile(id: string): Promise<void> {
+  const database = await db();
+  await database.runAsync('UPDATE history SET saved_uri = NULL WHERE id = ?', [id]);
+}
+
 export async function clearHistory(): Promise<void> {
   const database = await db();
   await database.runAsync('DELETE FROM history');
