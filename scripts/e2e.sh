@@ -94,9 +94,12 @@ PY
 }
 # Scroll until the labelled control sits in the upper two thirds of the screen, then tap it.
 tap_desc() {
+  local last=""
   for i in $(seq 1 12); do
     read -r x y _ <<<"$(desc_y "$1")"
-    if [ -n "$y" ] && [ "$y" -gt 80 ] && [ "$y" -lt 420 ]; then adb shell input tap $x $y; echo "tapped '$1'"; sleep 1; return 0; fi
+    # Tap once it is in the upper part of the screen, or when scrolling no longer moves it (end of list).
+    if [ -n "$y" ] && { { [ "$y" -gt 80 ] && [ "$y" -lt 420 ]; } || [ "$y" = "$last" ]; }; then adb shell input tap $x $y; echo "tapped '$1'"; sleep 1; return 0; fi
+    last="$y"
     if [ -n "$y" ] && [ "$y" -le 80 ]; then adb shell input swipe 160 250 160 450 300; else adb shell input swipe 160 450 160 250 300; fi
     sleep 1
   done
