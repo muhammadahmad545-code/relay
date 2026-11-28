@@ -1,9 +1,9 @@
 {
   "name": "relay",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "main": "expo-router/entry",
   "dependencies": {
-    "@basalt/core": "github:muhammadahmad545-code/basalt-core#v0.5.2",
+    "@basalt/core": "github:muhammadahmad545-code/basalt-core#v0.6.0",
     "@expo-google-fonts/inter": "^0.4.2",
     "expo": "~58.0.25",
     "expo-application": "~58.1.2",

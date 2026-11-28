@@ -26,7 +26,7 @@ const PAGES = [
 ];
 
 function Navigator() {
-  const { colors, scheme } = useTheme();
+  const { colors, scheme, reduceMotion } = useTheme();
   const [onboarded, setOnboarded] = onboardedSetting.use();
   const [locked] = lockSetting.use();
   const lock = useLock();
@@ -59,7 +59,7 @@ function Navigator() {
   return (
     <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg }, animation: 'slide_from_right' }} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg }, animation: reduceMotion ? 'fade' : 'slide_from_right' }} />
     </>
   );
 }

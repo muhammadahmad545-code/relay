@@ -10,6 +10,12 @@ Relay is an Android app. The phone runs a small encrypted server on your local n
 
 Pick the file ending in **`-arm64-v8a.apk`**: that is the right one for almost every phone from the last several years. `-armeabi-v7a.apk` is for older 32-bit phones and `-x86_64.apk` for emulators and Chromebooks. Installed apps update themselves to the matching file.
 
+## What's new in 1.4
+
+- **Appearance, your way:** Settings → Appearance. Pick the theme (system, light, dark), an accent from 12 presets or any colour with the colour picker, a background tone (neutral, warm, cool, tinted or pure black), the font (Inter, Manrope, Space Grotesk, Lora or the system font), text size and bold text, density, corner shape, depth (flat, soft shadows or glass), the navigation bar style and animations.
+- **Live preview:** the Appearance screen redraws itself with your choices before you press Apply, and Reset to default is one tap away. Custom colours are adjusted just enough to stay readable in both themes.
+- **Calmer motion when you want it:** reduced motion (or Android's Remove animations) turns sliding, scaling and springs into simple fades.
+
 ## What's new in 1.3
 
 - **A real logo.** A paper plane leaving its sending device, on the launcher, the splash screen and the notification.

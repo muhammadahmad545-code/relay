@@ -1,4 +1,4 @@
-import { Button, Card, Hero, ListItem, Screen, SectionTitle, SegmentedControl, TAB_BAR_SPACE, Text, TextField, Toggle, UpdateCard, themePreference, useTheme, useToast, useUpdater } from '@basalt/core';
+import { Button, Card, Hero, ListItem, Screen, SectionTitle, TAB_BAR_SPACE, Text, TextField, Toggle, UpdateCard, themePreference, useTheme, useToast, useUpdater } from '@basalt/core';
 import { canUseLock } from '@basalt/core/src/lock/LockGate';
 import * as Linking from 'expo-linking';
 import Fingerprint from 'lucide-react-native/icons/fingerprint-pattern';
@@ -8,20 +8,19 @@ import Code from 'lucide-react-native/icons/code';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import Sparkles from 'lucide-react-native/icons/sparkles';
+import Palette from 'lucide-react-native/icons/palette';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { REPO_URL, UPDATE_SOURCE, autoCopySetting, deviceName, lockSetting, onboardedSetting } from '../../lib/settings';
 
-const THEMES = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-] as const;
+const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' } as const;
 
 export default function Settings() {
   const { colors, spacing } = useTheme();
+  const router = useRouter();
   const toast = useToast();
-  const [theme, setTheme] = themePreference.use();
+  const [theme] = themePreference.use();
   const [name, setName] = deviceName.use();
   const [autoCopy, setAutoCopy] = autoCopySetting.use();
   const [lock, setLock] = lockSetting.use();
@@ -92,7 +91,9 @@ export default function Settings() {
       </Card>
 
       <SectionTitle title="Appearance" />
-      <SegmentedControl options={THEMES} value={theme} onChange={setTheme} />
+      <Card style={{ paddingVertical: spacing.xs }}>
+        <ListItem title="Appearance" subtitle={`${THEME_LABEL[theme]} theme · colour, font, text size, layout and motion`} icon={Palette} chevron onPress={() => router.push('/appearance')} />
+      </Card>
 
       <SectionTitle title="Updates" />
       <Card style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
